@@ -1,7 +1,8 @@
 <script lang="ts">
   import { Card, Button, Badge, Input } from '$lib/components/ui';
+  import DataTable from '$lib/components/ui/DataTable.svelte';
+  import type { Column } from '$lib/components/ui/DataTable.svelte';
   import {
-    FileText,
     Search,
     Play,
     Pause,
@@ -12,7 +13,6 @@
     PhoneOutgoing,
     Phone,
     User,
-    Clock,
     Volume2,
     X,
     Zap,
@@ -25,11 +25,11 @@
 
   let { data }: Props = $props();
 
-  let searchQuery = $state('');
   let selectedUserId = $state('');
   let fromDate = $state(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
   let toDate = $state(new Date().toISOString().split('T')[0]);
   let directionFilter = $state('');
+  let searchQuery = $state('');
 
   // Audio player state
   let currentlyPlayingId = $state<string | null>(null);
@@ -37,18 +37,32 @@
   let isPlaying = $state(false);
   let playbackError = $state<string | null>(null);
 
-  const filteredLogs = $derived(
-    data.callLogs.filter((log) => {
-      const matchesSearch =
-        log.fromNumber.includes(searchQuery) ||
-        log.toNumber.includes(searchQuery) ||
-        log.fromUserName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        log.toUserName?.toLowerCase().includes(searchQuery.toLowerCase());
+  // Column definitions
+  let columns = $state<Column[]>([
+    { key: 'direction', label: 'Direction', width: '80px' },
+    { key: 'dateTime', label: 'Date/Time', sortable: true },
+    { key: 'fromNumber', label: 'From', sortable: true },
+    { key: 'toNumber', label: 'To', sortable: true },
+    { key: 'duration', label: 'Duration', sortable: true },
+    { key: 'user', label: 'User' },
+    { key: 'recording', label: 'Recording' },
+    { key: 'actions', label: 'Actions', width: '100px' },
+  ]);
 
+  // Filter logs based on direction
+  const filteredLogs = $derived(() => {
+    return data.callLogs.filter((log) => {
       const matchesDirection = !directionFilter || log.direction === directionFilter;
+      return matchesDirection;
+    });
+  });
 
-      return matchesSearch && matchesDirection;
-    })
+  // Transform call logs for the data table
+  const tableData = $derived(
+    filteredLogs().map((log) => ({
+      ...log,
+      id: log.id,
+    }))
   );
 
   function formatDuration(seconds: number): string {
@@ -91,13 +105,13 @@
     if (toDate) params.set('toDate', toDate);
     if (selectedUserId) params.set('userId', selectedUserId);
     if (searchQuery) params.set('phoneNumber', searchQuery);
-    
+
     window.location.href = `/call-logs?${params.toString()}`;
   }
 
   function handlePlayRecording(recordingId: string) {
     playbackError = null;
-    
+
     // If already playing this recording, toggle pause/play
     if (currentlyPlayingId === recordingId && audioElement) {
       if (isPlaying) {
@@ -120,21 +134,21 @@
     currentlyPlayingId = recordingId;
     const audio = new Audio(`/api/recordings/${recordingId}?action=stream`);
     audioElement = audio;
-    
+
     audio.onplay = () => {
       isPlaying = true;
     };
-    
+
     audio.onpause = () => {
       isPlaying = false;
     };
-    
+
     audio.onended = () => {
       isPlaying = false;
       currentlyPlayingId = null;
       audioElement = null;
     };
-    
+
     audio.onerror = () => {
       playbackError = 'Failed to play recording. Check Sapien API configuration.';
       isPlaying = false;
@@ -160,7 +174,6 @@
   }
 
   function handleDownloadRecording(recordingId: string) {
-    // Trigger download by opening in new tab
     const link = document.createElement('a');
     link.href = `/api/recordings/${recordingId}?action=stream`;
     link.download = `recording-${recordingId}.mp3`;
@@ -168,26 +181,40 @@
     link.click();
     document.body.removeChild(link);
   }
+
+  function handleColumnsChange(updatedColumns: Column[]) {
+    columns = updatedColumns;
+  }
+
+  function handleRefresh() {
+    window.location.reload();
+  }
 </script>
 
 <svelte:head>
   <title>Call Logs and Recordings | Natterbox AVS</title>
 </svelte:head>
 
-<div class="space-y-6">
-  <!-- Demo Mode Banner -->
+<div class="flex flex-col gap-6 h-full min-h-0">
+  <!-- Status Banners -->
   {#if data.isDemo}
-    <div class="bg-warning/10 border border-warning/20 text-warning rounded-base p-4 flex items-center gap-3">
+    <div
+      class="bg-warning/10 border border-warning/20 text-warning rounded-lg p-4 flex items-center gap-3 flex-shrink-0"
+    >
       <FlaskConical class="w-5 h-5 flex-shrink-0" />
       <p class="text-sm">Demo Mode - showing sample data. Recording playback is disabled.</p>
     </div>
   {:else if data.canPlayRecordings}
-    <div class="bg-success/10 border border-success/20 text-success rounded-base p-4 flex items-center gap-3">
+    <div
+      class="bg-success/10 border border-success/20 text-success rounded-lg p-4 flex items-center gap-3 flex-shrink-0"
+    >
       <Zap class="w-5 h-5 flex-shrink-0" />
       <p class="text-sm">Connected to Sapien API - recording playback is available.</p>
     </div>
   {:else if !data.error}
-    <div class="bg-accent/10 border border-accent/20 text-accent rounded-base p-4 flex items-center gap-3">
+    <div
+      class="bg-accent/10 border border-accent/20 text-accent rounded-lg p-4 flex items-center gap-3 flex-shrink-0"
+    >
       <AlertCircle class="w-5 h-5 flex-shrink-0" />
       <p class="text-sm">Recording playback requires SAPIEN_HOST environment variable to be configured.</p>
     </div>
@@ -195,7 +222,9 @@
 
   <!-- Error Banner -->
   {#if data.error}
-    <div class="bg-error/10 border border-error/20 text-error rounded-base p-4 flex items-center gap-3">
+    <div
+      class="bg-error/10 border border-error/20 text-error rounded-lg p-4 flex items-center gap-3 flex-shrink-0"
+    >
       <AlertCircle class="w-5 h-5 flex-shrink-0" />
       <p>{data.error}</p>
     </div>
@@ -203,12 +232,14 @@
 
   <!-- Playback Error Banner -->
   {#if playbackError}
-    <div class="bg-error/10 border border-error/20 text-error rounded-base p-4 flex items-center justify-between">
+    <div
+      class="bg-error/10 border border-error/20 text-error rounded-lg p-4 flex items-center justify-between flex-shrink-0"
+    >
       <div class="flex items-center gap-3">
         <AlertCircle class="w-5 h-5 flex-shrink-0" />
         <p class="text-sm">{playbackError}</p>
       </div>
-      <button onclick={() => playbackError = null} class="p-1 hover:bg-error/20 rounded">
+      <button onclick={() => (playbackError = null)} class="p-1 hover:bg-error/20 rounded">
         <X class="w-4 h-4" />
       </button>
     </div>
@@ -216,7 +247,9 @@
 
   <!-- Now Playing Banner -->
   {#if currentlyPlayingId}
-    <div class="bg-accent/10 border border-accent/20 text-accent rounded-base p-4 flex items-center justify-between">
+    <div
+      class="bg-accent/10 border border-accent/20 text-accent rounded-lg p-4 flex items-center justify-between flex-shrink-0"
+    >
       <div class="flex items-center gap-3">
         <Volume2 class="w-5 h-5 flex-shrink-0 animate-pulse" />
         <p class="text-sm">Playing recording: {currentlyPlayingId}</p>
@@ -228,8 +261,8 @@
   {/if}
 
   <!-- Page Header -->
-  <div>
-    <h1 class="text-2xl font-bold">Call Logs and Recordings</h1>
+  <div class="flex-shrink-0">
+    <h1 class="text-2xl font-bold text-text-primary">Call Logs and Recordings</h1>
     <p class="text-text-secondary mt-1">
       Search and playback call recordings
       {#if data.totalCount > 0}
@@ -239,7 +272,7 @@
   </div>
 
   <!-- Search Filters -->
-  <Card>
+  <Card class="flex-shrink-0">
     <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
       <div>
         <label class="text-sm font-medium text-text-secondary">From Date</label>
@@ -264,7 +297,7 @@
       </div>
       <div class="flex items-end">
         <Button variant="primary" class="w-full" onclick={handleSearch}>
-          <Search class="w-4 h-4 mr-2" />
+          <Search class="w-4 h-4" />
           Search
         </Button>
       </div>
@@ -272,7 +305,7 @@
   </Card>
 
   <!-- Direction Filter -->
-  <div class="flex gap-2">
+  <div class="flex gap-2 flex-shrink-0">
     <Button
       variant={directionFilter === '' ? 'primary' : 'secondary'}
       size="sm"
@@ -285,7 +318,7 @@
       size="sm"
       onclick={() => (directionFilter = 'Inbound')}
     >
-      <PhoneIncoming class="w-4 h-4 mr-1" />
+      <PhoneIncoming class="w-4 h-4" />
       Inbound
     </Button>
     <Button
@@ -293,7 +326,7 @@
       size="sm"
       onclick={() => (directionFilter = 'Outbound')}
     >
-      <PhoneOutgoing class="w-4 h-4 mr-1" />
+      <PhoneOutgoing class="w-4 h-4" />
       Outbound
     </Button>
     <Button
@@ -301,133 +334,105 @@
       size="sm"
       onclick={() => (directionFilter = 'Internal')}
     >
-      <Phone class="w-4 h-4 mr-1" />
+      <Phone class="w-4 h-4" />
       Internal
     </Button>
   </div>
 
-  <!-- Call Logs Table -->
-  <Card padding="none">
-    <div class="overflow-x-auto">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Direction</th>
-            <th>Date/Time</th>
-            <th>From</th>
-            <th>To</th>
-            <th>Duration</th>
-            <th>User</th>
-            <th>Recording</th>
-            <th class="text-right">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each filteredLogs as log}
-            <tr>
-              <td>
-                <svelte:component
-                  this={getDirectionIcon(log.direction)}
-                  class="w-5 h-5 {getDirectionColor(log.direction)}"
-                />
-              </td>
-              <td>
-                <span class="text-sm">{formatDateTime(log.dateTime)}</span>
-              </td>
-              <td>
-                <div>
-                  <span class="font-mono text-sm">{log.fromNumber}</span>
-                  {#if log.fromUserName}
-                    <p class="text-xs text-text-secondary">{log.fromUserName}</p>
-                  {/if}
-                </div>
-              </td>
-              <td>
-                <div>
-                  <span class="font-mono text-sm">{log.toNumber}</span>
-                  {#if log.toUserName}
-                    <p class="text-xs text-text-secondary">{log.toUserName}</p>
-                  {/if}
-                </div>
-              </td>
-              <td>
-                <span class="font-mono">{formatDuration(log.duration)}</span>
-                {#if log.ringingTime > 0}
-                  <p class="text-xs text-text-secondary">Ring: {log.ringingTime}s</p>
-                {/if}
-              </td>
-              <td>
-                {#if log.fromUserName || log.toUserName}
-                  <span class="flex items-center gap-1 text-sm">
-                    <User class="w-3 h-3 text-text-secondary" />
-                    {log.direction === 'Outbound' ? log.fromUserName : log.toUserName}
-                  </span>
-                {:else}
-                  <span class="text-text-secondary">—</span>
-                {/if}
-              </td>
-              <td>
-                {#if log.hasRecording}
-                  <Badge variant="success">Available</Badge>
-                {:else}
-                  <Badge variant="neutral">No Recording</Badge>
-                {/if}
-              </td>
-              <td>
-                <div class="flex items-center justify-end gap-1">
-                  {#if log.hasRecording && log.recordingId}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onclick={() => handlePlayRecording(log.recordingId!)}
-                      disabled={!data.canPlayRecordings}
-                      title={data.canPlayRecordings ? 'Play recording' : 'Recording playback not available'}
-                    >
-                      {#if currentlyPlayingId === log.recordingId && isPlaying}
-                        <Pause class="w-4 h-4 text-accent" />
-                      {:else}
-                        <Play class="w-4 h-4" />
-                      {/if}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onclick={() => handleDownloadRecording(log.recordingId!)}
-                      disabled={!data.canPlayRecordings}
-                      title={data.canPlayRecordings ? 'Download recording' : 'Recording download not available'}
-                    >
-                      <Download class="w-4 h-4" />
-                    </Button>
-                  {:else}
-                    <span class="text-text-secondary">—</span>
-                  {/if}
-                </div>
-              </td>
-            </tr>
+  <!-- Data Table -->
+  <div class="flex-1 min-h-0">
+    <DataTable
+      data={tableData}
+      {columns}
+      paginated
+      pageSize={15}
+      columnSelector
+      onColumnsChange={handleColumnsChange}
+      onRefresh={handleRefresh}
+      emptyMessage="No call logs found. Try adjusting your search criteria."
+    >
+      {#snippet cell(column, row)}
+        {#if column.key === 'direction'}
+          {@const DirectionIcon = getDirectionIcon(String(row.direction))}
+          <svelte:component
+            this={DirectionIcon}
+            class="w-5 h-5 {getDirectionColor(String(row.direction))}"
+          />
+        {:else if column.key === 'dateTime'}
+          <span class="text-sm">{formatDateTime(String(row.dateTime))}</span>
+        {:else if column.key === 'fromNumber'}
+          <div>
+            <span class="font-mono text-sm">{row.fromNumber}</span>
+            {#if row.fromUserName}
+              <p class="text-xs text-text-secondary">{row.fromUserName}</p>
+            {/if}
+          </div>
+        {:else if column.key === 'toNumber'}
+          <div>
+            <span class="font-mono text-sm">{row.toNumber}</span>
+            {#if row.toUserName}
+              <p class="text-xs text-text-secondary">{row.toUserName}</p>
+            {/if}
+          </div>
+        {:else if column.key === 'duration'}
+          <span class="font-mono">{formatDuration(Number(row.duration))}</span>
+          {#if Number(row.ringingTime) > 0}
+            <p class="text-xs text-text-secondary">Ring: {row.ringingTime}s</p>
+          {/if}
+        {:else if column.key === 'user'}
+          {#if row.fromUserName || row.toUserName}
+            <span class="flex items-center gap-1 text-sm">
+              <User class="w-3 h-3 text-text-secondary" />
+              {row.direction === 'Outbound' ? row.fromUserName : row.toUserName}
+            </span>
           {:else}
-            <tr>
-              <td colspan="8" class="text-center py-8 text-text-secondary">
-                {#if data.callLogs.length === 0}
-                  No call logs found. Try adjusting your search criteria.
+            <span class="text-text-secondary">—</span>
+          {/if}
+        {:else if column.key === 'recording'}
+          {#if row.hasRecording}
+            <Badge variant="success">Available</Badge>
+          {:else}
+            <Badge variant="neutral">No Recording</Badge>
+          {/if}
+        {:else if column.key === 'actions'}
+          <div class="flex items-center justify-end gap-1">
+            {#if row.hasRecording && row.recordingId}
+              <Button
+                variant="ghost"
+                size="sm"
+                onclick={(e: MouseEvent) => {
+                  e.stopPropagation();
+                  handlePlayRecording(String(row.recordingId));
+                }}
+                disabled={!data.canPlayRecordings}
+                title={data.canPlayRecordings ? 'Play recording' : 'Recording playback not available'}
+              >
+                {#if currentlyPlayingId === row.recordingId && isPlaying}
+                  <Pause class="w-4 h-4 text-accent" />
                 {:else}
-                  No call logs match your filter.
+                  <Play class="w-4 h-4" />
                 {/if}
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
-
-    <!-- Pagination -->
-    <div class="border-t border-border px-4 py-3 flex items-center justify-between">
-      <p class="text-sm text-text-secondary">
-        Showing {filteredLogs.length} of {data.totalCount} call logs
-      </p>
-      <div class="flex gap-2">
-        <Button variant="secondary" size="sm" disabled>Previous</Button>
-        <Button variant="secondary" size="sm" disabled>Next</Button>
-      </div>
-    </div>
-  </Card>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onclick={(e: MouseEvent) => {
+                  e.stopPropagation();
+                  handleDownloadRecording(String(row.recordingId));
+                }}
+                disabled={!data.canPlayRecordings}
+                title={data.canPlayRecordings ? 'Download recording' : 'Recording download not available'}
+              >
+                <Download class="w-4 h-4" />
+              </Button>
+            {:else}
+              <span class="text-text-secondary">—</span>
+            {/if}
+          </div>
+        {:else}
+          {row[column.key] ?? '—'}
+        {/if}
+      {/snippet}
+    </DataTable>
+  </div>
 </div>
