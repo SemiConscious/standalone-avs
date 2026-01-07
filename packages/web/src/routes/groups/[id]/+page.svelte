@@ -15,14 +15,17 @@
     ChevronDown,
     Phone,
     User,
+    Info,
+    Shield,
   } from 'lucide-svelte';
   import type { ActionData } from './$types';
-  import type { Group } from './+page.server';
+  import type { Group, LicenseInfo } from './+page.server';
   
   interface Props {
     data: {
       group: Group | null;
       availableUsers: { id: string; name: string; username: string; extension: string }[];
+      licenseInfo: LicenseInfo | null;
       isDemo: boolean;
       error?: string;
     };
@@ -36,11 +39,30 @@
   let description = $state(data.group?.description || '');
   let type = $state(data.group?.type || 'RING_ALL');
   let maxQueueTime = $state(data.group?.maxQueueTime || 300);
+  let extension = $state(data.group?.extension || '');
+  let pbxEnabled = $state(data.group?.pbx || false);
+  let managerEnabled = $state(data.group?.manager || false);
+  let recordEnabled = $state(data.group?.record || false);
   
   let isSubmitting = $state(false);
   let showAddMember = $state(false);
   let selectedUserId = $state('');
   let newMemberPriority = $state(data.group?.members.length || 0);
+  
+  // Validation
+  let extensionError = $state('');
+  
+  function validateExtension() {
+    extensionError = '';
+    if (extension) {
+      const extNum = parseInt(extension);
+      if (isNaN(extNum)) {
+        extensionError = 'Extension must be a number';
+      } else if (extNum < 2000 || extNum > 7999) {
+        extensionError = 'Extension must be between 2000 and 7999';
+      }
+    }
+  }
   
   const groupTypes = [
     { value: 'RING_ALL', label: 'Ring All - Call all agents simultaneously' },
@@ -48,6 +70,8 @@
     { value: 'LEAST_CALLS', label: 'Least Calls - Agent with fewest calls' },
     { value: 'LONGEST_IDLE', label: 'Longest Idle - Agent idle longest' },
     { value: 'PRIORITY', label: 'Priority - Based on agent priority' },
+    { value: 'RANDOM', label: 'Random - Random agent selection' },
+    { value: 'LINEAR', label: 'Linear - Call agents in order' },
   ];
 </script>
 
@@ -198,8 +222,91 @@
             </p>
           </div>
 
+          <div>
+            <label for="extension" class="block text-sm font-medium mb-1">Extension</label>
+            <input
+              id="extension"
+              name="extension"
+              type="text"
+              bind:value={extension}
+              oninput={validateExtension}
+              class="input w-full"
+              class:border-error={extensionError}
+            />
+            {#if extensionError}
+              <p class="text-xs text-error mt-1">{extensionError}</p>
+            {:else}
+              <p class="text-xs text-text-secondary mt-1">Must be between 2000 and 7999</p>
+            {/if}
+          </div>
+
+          <!-- Group Purpose -->
+          <div class="pt-4 border-t border-border">
+            <div class="flex items-center gap-2 mb-3">
+              <Shield class="w-4 h-4 text-accent" />
+              <h3 class="text-sm font-semibold">Group Purpose</h3>
+            </div>
+
+            <div class="space-y-2">
+              <label class="flex items-center justify-between p-2 bg-bg-secondary rounded border border-border cursor-pointer hover:border-accent/50">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm">PBX (Call Queue)</span>
+                  {#if data.group?.pbx}
+                    <Badge variant="success" size="sm">Active</Badge>
+                  {/if}
+                </div>
+                <input
+                  type="checkbox"
+                  name="pbx"
+                  bind:checked={pbxEnabled}
+                  disabled={data.group?.pbx}
+                  class="w-4 h-4 rounded border-border text-accent focus:ring-accent disabled:opacity-50"
+                />
+              </label>
+
+              <label class="flex items-center justify-between p-2 bg-bg-secondary rounded border border-border cursor-pointer hover:border-accent/50">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm">Manager (Supervisor)</span>
+                  {#if data.group?.manager}
+                    <Badge variant="success" size="sm">Active</Badge>
+                  {/if}
+                </div>
+                <input
+                  type="checkbox"
+                  name="manager"
+                  bind:checked={managerEnabled}
+                  disabled={data.group?.manager}
+                  class="w-4 h-4 rounded border-border text-accent focus:ring-accent disabled:opacity-50"
+                />
+              </label>
+
+              <label class="flex items-center justify-between p-2 bg-bg-secondary rounded border border-border cursor-pointer hover:border-accent/50">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm">Record</span>
+                  {#if data.group?.record}
+                    <Badge variant="success" size="sm">Active</Badge>
+                  {/if}
+                </div>
+                <input
+                  type="checkbox"
+                  name="record"
+                  bind:checked={recordEnabled}
+                  disabled={data.group?.record}
+                  class="w-4 h-4 rounded border-border text-accent focus:ring-accent disabled:opacity-50"
+                />
+              </label>
+            </div>
+
+            {#if data.group?.pbx || data.group?.manager || data.group?.record}
+              <div class="mt-2 p-2 bg-info/10 border border-info/20 rounded flex items-start gap-2">
+                <Info class="w-3 h-3 text-info mt-0.5 flex-shrink-0" />
+                <p class="text-xs text-info">Active purposes cannot be removed.</p>
+              </div>
+            {/if}
+          </div>
+
           <div class="pt-2">
-            <Button variant="primary" type="submit" loading={isSubmitting}>
+            <Button variant="primary" type="submit" loading={isSubmitting} disabled={!!extensionError}>
               <Save class="w-4 h-4 mr-2" />
               Save Settings
             </Button>

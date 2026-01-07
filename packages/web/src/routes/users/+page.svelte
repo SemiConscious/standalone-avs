@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
+  import { page } from '$app/stores';
   import { Button, Badge } from '$lib/components/ui';
   import DataTable from '$lib/components/ui/DataTable.svelte';
   import type { Column } from '$lib/components/ui/DataTable.svelte';
@@ -17,21 +19,26 @@
     Monitor,
     MessageSquare,
     Eye,
+    ChevronLeft,
+    ChevronRight,
   } from 'lucide-svelte';
   import type { User } from './+page.server';
+  import type { PaginationMeta } from '$lib/server/pagination';
 
   interface Props {
     data: {
       users: User[];
+      pagination: PaginationMeta;
       isDemo: boolean;
-      totalCount: number;
       error?: string;
     };
   }
 
   let { data }: Props = $props();
 
-  let statusFilter = $state('');
+  // Get current filter from URL
+  const currentStatus = $derived($page.url.searchParams.get('status') || '');
+  const currentSearch = $derived($page.url.searchParams.get('search') || '');
 
   // Column definitions
   let columns = $state<Column[]>([
@@ -45,17 +52,9 @@
     { key: 'actions', label: 'Actions', width: '120px' },
   ]);
 
-  // Filter users based on status filter
-  const filteredUsers = $derived(() => {
-    return data.users.filter((user) => {
-      const matchesStatus = statusFilter === '' || user.status === statusFilter;
-      return matchesStatus;
-    });
-  });
-
-  // Transform users for the data table
+  // Transform users for the data table (no client-side filtering needed)
   const tableData = $derived(
-    filteredUsers().map((user) => ({
+    data.users.map((user) => ({
       ...user,
       id: user.id,
     }))
@@ -90,11 +89,46 @@
   }
 
   function handleRefresh() {
-    window.location.reload();
+    goto($page.url.pathname + $page.url.search, { invalidateAll: true });
   }
 
   function handleRowClick(row: Record<string, unknown>) {
-    window.location.href = `/users/${row.id}`;
+    goto(`/users/${row.id}`);
+  }
+
+  // Server-side pagination handlers
+  function updateUrl(updates: Record<string, string | null>) {
+    const url = new URL($page.url);
+    for (const [key, value] of Object.entries(updates)) {
+      if (value === null || value === '') {
+        url.searchParams.delete(key);
+      } else {
+        url.searchParams.set(key, value);
+      }
+    }
+    // Reset to page 1 when filters change (except for page changes)
+    if (!('page' in updates)) {
+      url.searchParams.delete('page');
+    }
+    goto(url.toString());
+  }
+
+  function handlePageChange(newPage: number) {
+    updateUrl({ page: newPage > 1 ? String(newPage) : null });
+  }
+
+  function handleStatusChange(e: Event) {
+    const value = (e.target as HTMLSelectElement).value;
+    updateUrl({ status: value || null });
+  }
+
+  function handleSearchChange(e: Event) {
+    const value = (e.target as HTMLInputElement).value;
+    // Debounce search input
+    clearTimeout((window as Record<string, ReturnType<typeof setTimeout>>).__searchTimeout);
+    (window as Record<string, ReturnType<typeof setTimeout>>).__searchTimeout = setTimeout(() => {
+      updateUrl({ search: value || null });
+    }, 300);
   }
 </script>
 
@@ -129,17 +163,17 @@
       <h1 class="text-2xl font-bold text-text-primary">Natterbox Users</h1>
       <p class="text-text-secondary mt-1">
         Manage AVS user accounts, licenses, and permissions
-        {#if data.totalCount > 0}
-          <span class="text-text-primary font-medium">({data.totalCount} total)</span>
+        {#if data.pagination.totalItems > 0}
+          <span class="text-text-primary font-medium">({data.pagination.totalItems} total)</span>
         {/if}
       </p>
     </div>
     <div class="flex gap-2">
-      <Button variant="secondary">
+      <Button variant="secondary" onclick={handleRefresh}>
         <RefreshCw class="w-4 h-4" />
         Sync
       </Button>
-      <Button variant="primary">
+      <Button variant="primary" href="/users/new">
         <Plus class="w-4 h-4" />
         Add User
       </Button>
@@ -151,10 +185,8 @@
     <DataTable
       data={tableData}
       {columns}
-      searchable
-      searchPlaceholder="Search by name, email, username, or extension..."
-      paginated
-      pageSize={25}
+      searchable={false}
+      paginated={false}
       columnSelector
       onColumnsChange={handleColumnsChange}
       onRefresh={handleRefresh}
@@ -162,9 +194,19 @@
       emptyMessage="No users found"
     >
       {#snippet toolbar()}
+        <!-- Server-side search input -->
+        <input
+          type="text"
+          placeholder="Search by name, email, username, or extension..."
+          value={currentSearch}
+          oninput={handleSearchChange}
+          class="px-3 py-2 text-sm bg-surface-900 border border-surface-600 rounded-lg text-surface-100 focus:outline-none focus:ring-2 focus:ring-primary-500 w-72"
+        />
+        <!-- Server-side status filter -->
         <select
           class="px-3 py-2 text-sm bg-surface-900 border border-surface-600 rounded-lg text-surface-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
-          bind:value={statusFilter}
+          value={currentStatus}
+          onchange={handleStatusChange}
         >
           <option value="">All Statuses</option>
           <option value="active">Active</option>
@@ -297,5 +339,37 @@
         {/if}
       {/snippet}
     </DataTable>
+
+    <!-- Server-Side Pagination Controls -->
+    {#if data.pagination.totalPages > 1}
+      <div class="flex items-center justify-between px-4 py-3 border-t border-surface-600">
+        <div class="text-sm text-text-secondary">
+          Showing {((data.pagination.page - 1) * data.pagination.pageSize) + 1} to {Math.min(data.pagination.page * data.pagination.pageSize, data.pagination.totalItems)} of {data.pagination.totalItems} users
+        </div>
+        <div class="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={!data.pagination.hasPreviousPage}
+            onclick={() => handlePageChange(data.pagination.page - 1)}
+          >
+            <ChevronLeft class="w-4 h-4" />
+            Previous
+          </Button>
+          <span class="text-sm text-text-secondary px-2">
+            Page {data.pagination.page} of {data.pagination.totalPages}
+          </span>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={!data.pagination.hasNextPage}
+            onclick={() => handlePageChange(data.pagination.page + 1)}
+          >
+            Next
+            <ChevronRight class="w-4 h-4" />
+          </Button>
+        </div>
+      </div>
+    {/if}
   </div>
 </div>

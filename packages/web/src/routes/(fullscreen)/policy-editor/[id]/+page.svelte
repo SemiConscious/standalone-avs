@@ -8,6 +8,28 @@
   import { transformLegacyPolicy } from '$lib/policy-editor';
   import type { ActionData } from './$types';
   
+  interface UserData {
+    id: string;
+    name: string;
+    email?: string;
+  }
+  
+  interface GroupData {
+    id: string;
+    name: string;
+  }
+  
+  interface SoundData {
+    id: string;
+    name: string;
+  }
+  
+  interface PhoneNumberData {
+    id: string;
+    name: string;
+    number: string;
+  }
+  
   interface PolicyEditorPageData {
     policy?: {
       id: string;
@@ -19,6 +41,10 @@
       };
       isActive?: boolean;
     };
+    users?: UserData[];
+    groups?: GroupData[];
+    sounds?: SoundData[];
+    phoneNumbers?: PhoneNumberData[];
     isDemo: boolean;
     isAuthenticated: boolean;
   }
@@ -179,7 +205,15 @@
         </Card>
       </div>
     {:else}
-      <FlowEditor nodes={nodesStore} edges={edgesStore} onSave={handleSave} />
+      <FlowEditor 
+        nodes={nodesStore} 
+        edges={edgesStore} 
+        users={data.users || []}
+        groups={data.groups || []}
+        sounds={data.sounds || []}
+        phoneNumbers={data.phoneNumbers || []}
+        onSave={handleSave} 
+      />
     {/if}
     
     <!-- Save status message -->

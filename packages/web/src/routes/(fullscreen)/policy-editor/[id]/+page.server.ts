@@ -129,8 +129,8 @@ function mapLegacyNodeType(templateClass?: string, nodeType?: string): string {
 export const load: PageServerLoad = async ({ params, locals }) => {
   const policyId = params.id;
 
-  if (!hasValidCredentials(locals)) {
-    // Return demo data for unauthenticated users
+  // Return demo data for explicit 'demo' ID or unauthenticated users
+  if (policyId === 'demo' || !hasValidCredentials(locals)) {
     return getDemoData(policyId);
   }
 
@@ -373,47 +373,173 @@ function getDemoData(policyId: string): PolicyEditorPageData {
     policy: {
       id: policyId,
       name: 'Demo Routing Policy',
-      description: 'This is a demonstration routing policy',
+      description: 'This is a demonstration routing policy showing all node types',
       body: {
         nodes: [
+          // === ENTRY POINTS (Row 1) ===
           {
-            id: 'init-1',
-            type: 'init',
-            position: { x: 50, y: 200 },
-            data: { label: 'Start' },
-          },
-          {
-            id: 'input-1',
-            type: 'input',
-            position: { x: 200, y: 100 },
+            id: 'inbound-1',
+            type: 'inboundNumber',
+            position: { x: 50, y: 50 },
             data: { 
               label: 'Inbound Number',
               phoneNumber: '+1 555-0100',
             },
           },
           {
-            id: 'default-1',
-            type: 'default',
-            position: { x: 400, y: 200 },
+            id: 'extension-1',
+            type: 'extensionNumber',
+            position: { x: 280, y: 50 },
             data: { 
-              label: 'Call Queue',
-              containerType: 'callQueue',
-              queueName: 'Sales Queue',
+              label: 'Extension',
+              extension: '1001',
             },
           },
           {
-            id: 'output-1',
-            type: 'output',
-            position: { x: 650, y: 200 },
-            data: { label: 'End' },
+            id: 'sipTrunk-1',
+            type: 'sipTrunk',
+            position: { x: 510, y: 50 },
+            data: { 
+              label: 'SIP Trunk',
+            },
+          },
+          {
+            id: 'inboundMessage-1',
+            type: 'inboundMessage',
+            position: { x: 740, y: 50 },
+            data: { 
+              label: 'Inbound Message',
+            },
+          },
+          {
+            id: 'invokable-1',
+            type: 'invokableDestination',
+            position: { x: 970, y: 50 },
+            data: { 
+              label: 'Invokable Destination',
+            },
+          },
+          {
+            id: 'fromPolicy-1',
+            type: 'fromPolicy',
+            position: { x: 1200, y: 50 },
+            data: { 
+              label: 'From Policy',
+            },
+          },
+          
+          // === CONTAINERS (Row 2) ===
+          {
+            id: 'action-1',
+            type: 'action',
+            position: { x: 50, y: 250 },
+            data: { 
+              label: 'Action',
+              containerType: 'action',
+              outputs: [
+                {
+                  id: 'action-1-speak',
+                  name: 'Speak',
+                  title: 'Speak',
+                  type: 'speak',
+                  output: { id: 'action-1-speak-out', name: 'Default', type: 'default', target: null },
+                },
+                {
+                  id: 'action-1-queue',
+                  name: 'Call Queue',
+                  title: 'Call Queue',
+                  type: 'callQueue',
+                  output: { id: 'action-1-queue-out', name: 'Default', type: 'default', target: null },
+                },
+              ],
+            },
+          },
+          {
+            id: 'switchboard-1',
+            type: 'switchBoard',
+            position: { x: 330, y: 250 },
+            data: { 
+              label: 'Switchboard',
+              containerType: 'switchBoard',
+              outputs: [
+                {
+                  id: 'sw-1-option1',
+                  name: 'Sales',
+                  title: 'Sales',
+                  type: 'switchItem',
+                  output: { id: 'sw-1-option1-out', name: 'Default', type: 'default', target: null },
+                },
+                {
+                  id: 'sw-1-option2',
+                  name: 'Support',
+                  title: 'Support',
+                  type: 'switchItem',
+                  output: { id: 'sw-1-option2-out', name: 'Default', type: 'default', target: null },
+                },
+              ],
+            },
+          },
+          {
+            id: 'natterboxAI-1',
+            type: 'natterboxAI',
+            position: { x: 610, y: 250 },
+            data: { 
+              label: 'Natterbox AI',
+              containerType: 'natterboxAI',
+              outputs: [
+                {
+                  id: 'ai-1-intent1',
+                  name: 'Book Appointment',
+                  title: 'Book Appointment',
+                  type: 'aiIntent',
+                  output: { id: 'ai-1-intent1-out', name: 'Default', type: 'default', target: null },
+                },
+              ],
+            },
+          },
+          {
+            id: 'omniChannel-1',
+            type: 'omniChannelFlow',
+            position: { x: 890, y: 250 },
+            data: { 
+              label: 'Omni Channel Flow',
+              containerType: 'omniChannelFlow',
+            },
+          },
+          {
+            id: 'toPolicy-1',
+            type: 'toPolicy',
+            position: { x: 1170, y: 250 },
+            data: { 
+              label: 'To Policy',
+              targetPolicy: 'other-policy-id',
+            },
+          },
+          
+          // === OUTPUT (Row 3) ===
+          {
+            id: 'finish-1',
+            type: 'finish',
+            position: { x: 550, y: 450 },
+            data: { 
+              label: 'Finish',
+            },
           },
         ],
         edges: [
-          { id: 'e1', source: 'init-1', target: 'input-1' },
-          { id: 'e2', source: 'input-1', target: 'default-1' },
-          { id: 'e3', source: 'default-1', target: 'output-1' },
+          // Entry points to containers
+          { id: 'e1', source: 'inbound-1', target: 'action-1' },
+          { id: 'e2', source: 'extension-1', target: 'switchboard-1' },
+          { id: 'e3', source: 'sipTrunk-1', target: 'natterboxAI-1' },
+          { id: 'e4', source: 'inboundMessage-1', target: 'omniChannel-1' },
+          { id: 'e5', source: 'invokable-1', target: 'toPolicy-1' },
+          // Containers to finish
+          { id: 'e6', source: 'action-1', target: 'finish-1' },
+          { id: 'e7', source: 'switchboard-1', target: 'finish-1' },
+          { id: 'e8', source: 'natterboxAI-1', target: 'finish-1' },
+          { id: 'e9', source: 'omniChannel-1', target: 'finish-1' },
         ],
-        viewport: { x: 0, y: 0, zoom: 1 },
+        viewport: { x: 0, y: 0, zoom: 0.8 },
       },
       color: '#3b82f6',
       grid: true,
@@ -424,18 +550,22 @@ function getDemoData(policyId: string): PolicyEditorPageData {
     users: [
       { id: 'u1', name: 'John Smith', email: 'john@example.com' },
       { id: 'u2', name: 'Jane Doe', email: 'jane@example.com' },
+      { id: 'u3', name: 'Bob Wilson', email: 'bob@example.com' },
     ],
     groups: [
       { id: 'g1', name: 'Sales' },
       { id: 'g2', name: 'Support' },
+      { id: 'g3', name: 'Engineering' },
     ],
     sounds: [
       { id: 's1', name: 'Hold Music 1' },
       { id: 's2', name: 'Welcome Message' },
+      { id: 's3', name: 'Transfer Message' },
     ],
     phoneNumbers: [
       { id: 'p1', name: 'Main Line', number: '+1 555-0100' },
       { id: 'p2', name: 'Support Line', number: '+1 555-0200' },
+      { id: 'p3', name: 'Sales Line', number: '+1 555-0300' },
     ],
     isAuthenticated: false,
     isDemo: true,

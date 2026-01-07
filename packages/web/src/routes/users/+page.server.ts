@@ -1,5 +1,18 @@
 import { querySalesforce, hasValidCredentials } from '$lib/server/salesforce';
-import { env } from '$env/dynamic/private';
+import {
+  parsePaginationParams,
+  buildSoqlOrderBy,
+  buildSoqlPagination,
+  buildSoqlSearch,
+  combineSoqlConditions,
+  buildPaginationMeta,
+  paginateArray,
+  createSearchFn,
+  createSortFn,
+  createFilterFn,
+  type PaginationMeta,
+} from '$lib/server/pagination';
+import { isDemoMode, DEMO_USERS, type DemoUser } from '$lib/server/demo';
 import type { PageServerLoad } from './$types';
 
 interface SalesforceUser {
@@ -34,120 +47,8 @@ interface SalesforceGroupMember {
   nbavs__Group__r: { Id: string; Name: string };
 }
 
-export interface User {
-  id: string;
-  sapienId: number;
-  name: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  username: string;
-  extension: string;
-  mobilePhone: string;
-  status: 'active' | 'inactive' | 'suspended';
-  enabled: boolean;
-  // License flags
-  licenses: {
-    cti: boolean;
-    pbx: boolean;
-    manager: boolean;
-    record: boolean;
-    pci: boolean;
-    scv: boolean;
-    sms: boolean;
-    whatsApp: boolean;
-    insights: boolean;
-    freedom: boolean;
-  };
-  permissionLevel: string;
-  trackOutboundCTIDevice: boolean;
-  availabilityProfile?: string;
-  availabilityState?: string;
-  linkedSalesforceUser?: { name: string; email: string };
-  groups: string[];
-}
-
-// Demo data
-const DEMO_USERS: User[] = [
-  {
-    id: 'u001',
-    sapienId: 12345,
-    name: 'John Smith',
-    firstName: 'John',
-    lastName: 'Smith',
-    email: 'john.smith@natterbox.com',
-    username: 'john.smith@natterbox.com',
-    extension: '2001',
-    mobilePhone: '+447123456789',
-    status: 'active',
-    enabled: true,
-    licenses: { cti: true, pbx: true, manager: true, record: true, pci: false, scv: false, sms: true, whatsApp: false, insights: true, freedom: false },
-    permissionLevel: 'Admin',
-    trackOutboundCTIDevice: true,
-    availabilityProfile: 'Support Level 2',
-    availabilityState: 'Available',
-    linkedSalesforceUser: { name: 'John Smith', email: 'john.smith@company.com' },
-    groups: ['Sales Team', 'UK Support'],
-  },
-  {
-    id: 'u002',
-    sapienId: 12346,
-    name: 'Jane Doe',
-    firstName: 'Jane',
-    lastName: 'Doe',
-    email: 'jane.doe@natterbox.com',
-    username: 'jane.doe@natterbox.com',
-    extension: '2002',
-    mobilePhone: '+447987654321',
-    status: 'active',
-    enabled: true,
-    licenses: { cti: true, pbx: true, manager: false, record: true, pci: false, scv: true, sms: true, whatsApp: true, insights: true, freedom: false },
-    permissionLevel: 'Team Leader',
-    trackOutboundCTIDevice: false,
-    availabilityProfile: 'Default',
-    availabilityState: 'Busy',
-    linkedSalesforceUser: { name: 'Jane Doe', email: 'jane.doe@company.com' },
-    groups: ['Support Team'],
-  },
-  {
-    id: 'u003',
-    sapienId: 12347,
-    name: 'Bob Johnson',
-    firstName: 'Bob',
-    lastName: 'Johnson',
-    email: 'bob.johnson@natterbox.com',
-    username: 'bob.johnson@natterbox.com',
-    extension: '2003',
-    mobilePhone: '',
-    status: 'inactive',
-    enabled: false,
-    licenses: { cti: false, pbx: false, manager: false, record: false, pci: false, scv: false, sms: false, whatsApp: false, insights: false, freedom: false },
-    permissionLevel: 'Basic',
-    trackOutboundCTIDevice: false,
-    linkedSalesforceUser: { name: 'Bob Johnson', email: 'bob.johnson@company.com' },
-    groups: [],
-  },
-  {
-    id: 'u004',
-    sapienId: 12348,
-    name: 'Alice Williams',
-    firstName: 'Alice',
-    lastName: 'Williams',
-    email: 'alice.williams@natterbox.com',
-    username: 'alice.williams@natterbox.com',
-    extension: '2004',
-    mobilePhone: '+447555123456',
-    status: 'active',
-    enabled: true,
-    licenses: { cti: true, pbx: true, manager: false, record: false, pci: false, scv: false, sms: false, whatsApp: false, insights: false, freedom: true },
-    permissionLevel: 'Basic',
-    trackOutboundCTIDevice: true,
-    availabilityProfile: 'Platform Support',
-    availabilityState: 'Available',
-    linkedSalesforceUser: { name: 'Alice Williams', email: 'alice.williams@company.com' },
-    groups: ['US Sales'],
-  },
-];
+// Re-export User type from centralized demo data
+export type User = DemoUser;
 
 function mapStatus(sfUser: SalesforceUser): User['status'] {
   if (!sfUser.nbavs__Enabled__c) return 'inactive';
@@ -155,19 +56,94 @@ function mapStatus(sfUser: SalesforceUser): User['status'] {
   return 'active';
 }
 
-export const load: PageServerLoad = async ({ locals }) => {
-  // Demo mode
-  if (env.PUBLIC_DEMO_MODE === 'true' || env.PUBLIC_DEMO_MODE === '1') {
-    return { users: DEMO_USERS, isDemo: true, totalCount: DEMO_USERS.length };
+// Field mapping for sort (UI field name -> SOQL field name)
+const SORT_FIELD_MAP: Record<string, string> = {
+  name: 'Name',
+  user: 'Name',
+  extension: 'nbavs__SipExtension__c',
+  status: 'nbavs__Enabled__c',
+  permissionLevel: 'nbavs__PermissionLevel__c',
+};
+
+// Searchable fields for SOQL
+const SEARCH_FIELDS = [
+  'Name',
+  'nbavs__Username__c',
+  'nbavs__SipExtension__c',
+  'nbavs__FirstName__c',
+  'nbavs__LastName__c',
+];
+
+export const load: PageServerLoad = async ({ locals, url }) => {
+  // Parse pagination params from URL
+  const params = parsePaginationParams(url, {
+    pageSize: 25,
+    sortBy: 'name',
+    sortOrder: 'asc',
+  });
+
+  // Demo mode - use in-memory pagination
+  if (isDemoMode()) {
+    const result = paginateArray(DEMO_USERS, params, {
+      searchFn: createSearchFn(['name', 'email', 'username', 'extension']),
+      sortFn: createSortFn(),
+      filterFn: createFilterFn(['status', 'enabled']),
+    });
+    
+    return {
+      users: result.items,
+      pagination: result.pagination,
+      isDemo: true,
+    };
   }
 
   // Check credentials
   if (!hasValidCredentials(locals)) {
-    return { users: [], isDemo: false, totalCount: 0, error: 'Not authenticated' };
+    return {
+      users: [],
+      pagination: buildPaginationMeta(1, params.pageSize, 0),
+      isDemo: false,
+      error: 'Not authenticated',
+    };
   }
 
   try {
-    // Fetch users
+    // Build WHERE conditions
+    const conditions: string[] = [];
+    
+    // Search condition
+    if (params.search) {
+      const searchCondition = buildSoqlSearch(params.search, SEARCH_FIELDS);
+      if (searchCondition) conditions.push(searchCondition);
+    }
+    
+    // Status filter
+    if (params.filters.status) {
+      if (params.filters.status === 'active') {
+        conditions.push('nbavs__Enabled__c = true');
+      } else if (params.filters.status === 'inactive') {
+        conditions.push('nbavs__Enabled__c = false');
+      }
+    }
+    
+    // Build complete WHERE clause
+    const whereClause = combineSoqlConditions(conditions);
+    
+    // Get sort field for SOQL
+    const soqlSortField = SORT_FIELD_MAP[params.sortBy || 'name'] || 'Name';
+    const orderByClause = buildSoqlOrderBy(soqlSortField, params.sortOrder);
+    const paginationClause = buildSoqlPagination(params.page, params.pageSize);
+    
+    // Count total records (for pagination meta)
+    const countSoql = `SELECT COUNT() FROM nbavs__User__c ${whereClause}`;
+    const countResult = await querySalesforce<Record<string, unknown>>(
+      locals.instanceUrl!,
+      locals.accessToken!,
+      countSoql
+    );
+    const totalCount = countResult.totalSize;
+
+    // Fetch users with pagination
     const userSoql = `
       SELECT Id, Name, nbavs__Id__c,
              nbavs__FirstName__c, nbavs__LastName__c, 
@@ -182,8 +158,9 @@ export const load: PageServerLoad = async ({ locals }) => {
              nbavs__AvailabilityProfileState__r.nbavs__DisplayName__c,
              nbavs__User__r.Name, nbavs__User__r.Email
       FROM nbavs__User__c
-      ORDER BY Name
-      LIMIT 2000
+      ${whereClause}
+      ${orderByClause}
+      ${paginationClause}
     `;
 
     const usersResult = await querySalesforce<SalesforceUser>(
@@ -192,7 +169,7 @@ export const load: PageServerLoad = async ({ locals }) => {
       userSoql
     );
 
-    // Get group memberships for all users
+    // Get group memberships for the fetched users only
     const userIds = usersResult.records.map((u) => `'${u.Id}'`).join(',');
     let groupMemberships: Map<string, string[]> = new Map();
 
@@ -256,9 +233,18 @@ export const load: PageServerLoad = async ({ locals }) => {
       groups: groupMemberships.get(sfUser.Id) || [],
     }));
 
-    return { users, isDemo: false, totalCount: usersResult.totalSize };
+    return {
+      users,
+      pagination: buildPaginationMeta(params.page, params.pageSize, totalCount),
+      isDemo: false,
+    };
   } catch (error) {
     console.error('Failed to fetch users:', error);
-    return { users: [], isDemo: false, totalCount: 0, error: 'Failed to load users' };
+    return {
+      users: [],
+      pagination: buildPaginationMeta(1, params.pageSize, 0),
+      isDemo: false,
+      error: 'Failed to load users',
+    };
   }
 };

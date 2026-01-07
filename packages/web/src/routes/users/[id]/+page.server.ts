@@ -1,11 +1,16 @@
 import type { PageServerLoad, Actions } from './$types';
 import { hasValidCredentials, querySalesforce, updateSalesforce } from '$lib/server/salesforce';
 import { getSapienJwt, sapienRequest, getSapienConfig } from '$lib/server/sapien';
+import { getOrganizationLicenses, validateUserLicenses, type OrganizationLicenses } from '$lib/server/license';
 import { env } from '$env/dynamic/private';
-import { error, fail, redirect } from '@sveltejs/kit';
+import { error, fail } from '@sveltejs/kit';
 import type { User } from '../+page.server';
 
 const NAMESPACE = env.SALESFORCE_PACKAGE_NAMESPACE || 'nbavs';
+
+// Extension validation constants
+const EXTENSION_MIN = 1000;
+const EXTENSION_MAX = 9999;
 
 interface SalesforceUser {
   Id: string;
@@ -70,6 +75,27 @@ const DEMO_USER: User = {
   groups: ['Sales Team', 'UK Support'],
 };
 
+const DEMO_LICENSE_STATUS = {
+  enabled: true,
+  limit: 100,
+  used: 45,
+  available: 55,
+  percentUsed: 45,
+};
+
+const DEMO_ORG_LICENSES: OrganizationLicenses = {
+  pbx: DEMO_LICENSE_STATUS,
+  cti: DEMO_LICENSE_STATUS,
+  manager: { ...DEMO_LICENSE_STATUS, used: 10, available: 90, percentUsed: 10 },
+  record: { ...DEMO_LICENSE_STATUS, used: 30, available: 70, percentUsed: 30 },
+  sms: { ...DEMO_LICENSE_STATUS, limit: 50, used: 20, available: 30, percentUsed: 40 },
+  whatsApp: { enabled: false, limit: 0, used: 0, available: 0, percentUsed: 0 },
+  insights: DEMO_LICENSE_STATUS,
+  freedom: { enabled: false, limit: 0, used: 0, available: 0, percentUsed: 0 },
+  pci: { enabled: false, limit: 0, used: 0, available: 0, percentUsed: 0 },
+  scv: { enabled: false, limit: 0, used: 0, available: 0, percentUsed: 0 },
+};
+
 function mapStatus(sfUser: SalesforceUser): User['status'] {
   if (!sfUser.nbavs__Enabled__c) return 'inactive';
   if (sfUser.nbavs__Status__c === 'SUSPENDED') return 'suspended';
@@ -92,6 +118,7 @@ export const load: PageServerLoad = async ({ params, locals }) => {
         { Id: 'sf1', Name: 'John Smith', Email: 'john.smith@company.com' },
         { Id: 'sf2', Name: 'Jane Doe', Email: 'jane.doe@company.com' },
       ],
+      organizationLicenses: DEMO_ORG_LICENSES,
       isDemo: true,
     };
   }
@@ -101,12 +128,21 @@ export const load: PageServerLoad = async ({ params, locals }) => {
       user: null,
       availabilityProfiles: [],
       salesforceUsers: [],
+      organizationLicenses: null,
       isDemo: false,
       error: 'Not authenticated',
     };
   }
 
   try {
+    // Fetch organization licenses
+    let organizationLicenses: OrganizationLicenses | null = null;
+    try {
+      organizationLicenses = await getOrganizationLicenses(locals.instanceUrl!, locals.accessToken!);
+    } catch (e) {
+      console.warn('Failed to fetch organization licenses:', e);
+    }
+
     // Fetch user
     const userSoql = `
       SELECT Id, Name, ${NAMESPACE}__Id__c,
@@ -237,6 +273,7 @@ export const load: PageServerLoad = async ({ params, locals }) => {
       user,
       availabilityProfiles,
       salesforceUsers,
+      organizationLicenses,
       isDemo: false,
     };
   } catch (e) {
@@ -246,6 +283,7 @@ export const load: PageServerLoad = async ({ params, locals }) => {
       user: null,
       availabilityProfiles: [],
       salesforceUsers: [],
+      organizationLicenses: null,
       isDemo: false,
       error: e instanceof Error ? e.message : 'Failed to load user',
     };
@@ -284,6 +322,129 @@ export const actions: Actions = {
     const whatsApp = formData.get('license_whatsApp') === 'true';
     const insights = formData.get('license_insights') === 'true';
     const freedom = formData.get('license_freedom') === 'true';
+
+    const errors: string[] = [];
+
+    // Validation
+    if (!firstName || !lastName) {
+      errors.push('First name and last name are required');
+    }
+
+    // Extension validation
+    if (extension) {
+      const extNum = parseInt(extension);
+      if (isNaN(extNum) || extNum < EXTENSION_MIN || extNum > EXTENSION_MAX) {
+        errors.push(`Extension must be between ${EXTENSION_MIN} and ${EXTENSION_MAX}`);
+      }
+
+      // Check for duplicate extension
+      try {
+        const duplicateCheck = await querySalesforce<{ Id: string }>(
+          locals.instanceUrl!,
+          locals.accessToken!,
+          `SELECT Id FROM ${NAMESPACE}__User__c WHERE ${NAMESPACE}__SipExtension__c = '${extension}' AND Id != '${id}' LIMIT 1`
+        );
+        if (duplicateCheck.records.length > 0) {
+          errors.push('Extension is already in use by another user');
+        }
+
+        // Also check groups
+        const groupDuplicateCheck = await querySalesforce<{ Id: string }>(
+          locals.instanceUrl!,
+          locals.accessToken!,
+          `SELECT Id FROM ${NAMESPACE}__Group__c WHERE ${NAMESPACE}__Extension__c = '${extension}' LIMIT 1`
+        );
+        if (groupDuplicateCheck.records.length > 0) {
+          errors.push('Extension is already in use by a group');
+        }
+      } catch (e) {
+        console.warn('Failed to check extension uniqueness:', e);
+      }
+    }
+
+    // License validation
+    const requestedLicenses = { cti, pbx, manager, record, pci, scv, sms, whatsApp, insights, freedom };
+    
+    // Get current user licenses to check if adding new ones
+    try {
+      const currentUserSoql = `
+        SELECT ${NAMESPACE}__CTI__c, ${NAMESPACE}__PBX__c, ${NAMESPACE}__Manager__c, ${NAMESPACE}__Record__c,
+               ${NAMESPACE}__PCI__c, ${NAMESPACE}__SCV__c, ${NAMESPACE}__SMS__c, ${NAMESPACE}__WhatsApp__c,
+               ${NAMESPACE}__Insights__c, ${NAMESPACE}__Freedom__c
+        FROM ${NAMESPACE}__User__c WHERE Id = '${id}'
+      `;
+      const currentUser = await querySalesforce<Record<string, boolean>>(locals.instanceUrl!, locals.accessToken!, currentUserSoql);
+      
+      if (currentUser.records.length > 0) {
+        const current = currentUser.records[0];
+        
+        // Only validate new licenses being added
+        const newLicenses: { [key: string]: boolean } = {};
+        if (cti && !current[`${NAMESPACE}__CTI__c`]) newLicenses.cti = true;
+        if (pbx && !current[`${NAMESPACE}__PBX__c`]) newLicenses.pbx = true;
+        if (manager && !current[`${NAMESPACE}__Manager__c`]) newLicenses.manager = true;
+        if (record && !current[`${NAMESPACE}__Record__c`]) newLicenses.record = true;
+        if (pci && !current[`${NAMESPACE}__PCI__c`]) newLicenses.pci = true;
+        if (scv && !current[`${NAMESPACE}__SCV__c`]) newLicenses.scv = true;
+        if (sms && !current[`${NAMESPACE}__SMS__c`]) newLicenses.sms = true;
+        if (whatsApp && !current[`${NAMESPACE}__WhatsApp__c`]) newLicenses.whatsApp = true;
+        if (insights && !current[`${NAMESPACE}__Insights__c`]) newLicenses.insights = true;
+        if (freedom && !current[`${NAMESPACE}__Freedom__c`]) newLicenses.freedom = true;
+        
+        if (Object.keys(newLicenses).length > 0) {
+          const orgLicenses = await getOrganizationLicenses(locals.instanceUrl!, locals.accessToken!);
+          const validation = validateUserLicenses(newLicenses, orgLicenses, false);
+          
+          if (!validation.valid) {
+            errors.push(...validation.errors);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to validate licenses:', e);
+    }
+
+    // Check group membership license requirements
+    try {
+      const groupsSoql = `
+        SELECT ${NAMESPACE}__Group__r.Name, 
+               ${NAMESPACE}__Group__r.${NAMESPACE}__PBX__c,
+               ${NAMESPACE}__Group__r.${NAMESPACE}__Manager__c,
+               ${NAMESPACE}__Group__r.${NAMESPACE}__Record__c
+        FROM ${NAMESPACE}__GroupMember__c
+        WHERE ${NAMESPACE}__User__c = '${id}'
+      `;
+      const groupsResult = await querySalesforce<{
+        nbavs__Group__r: {
+          Name: string;
+          nbavs__PBX__c: boolean;
+          nbavs__Manager__c: boolean;
+          nbavs__Record__c: boolean;
+        };
+      }>(locals.instanceUrl!, locals.accessToken!, groupsSoql);
+
+      for (const gm of groupsResult.records) {
+        const group = gm.nbavs__Group__r;
+        if (!group) continue;
+
+        // User cannot remove a license if they're in a group that requires it
+        if (group.nbavs__PBX__c && !pbx) {
+          errors.push(`Cannot remove PBX license: user is a member of group "${group.Name}" which requires PBX`);
+        }
+        if (group.nbavs__Manager__c && !manager) {
+          errors.push(`Cannot remove Manager license: user is a member of group "${group.Name}" which requires Manager`);
+        }
+        if (group.nbavs__Record__c && !record) {
+          errors.push(`Cannot remove Record license: user is a member of group "${group.Name}" which requires Record`);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to check group license requirements:', e);
+    }
+
+    if (errors.length > 0) {
+      return fail(400, { error: errors.join('. ') });
+    }
 
     try {
       // Build update payload

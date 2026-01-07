@@ -6,6 +6,7 @@
   import FlowEdge from './components/FlowEdge.svelte';
   import NodePalette from './components/NodePalette.svelte';
   import NodeOptionsPanel from './components/NodeOptionsPanel.svelte';
+  import StartButton from './components/StartButton.svelte';
   import { 
     ZoomIn, ZoomOut, Maximize2, MousePointer2, Hand, 
     Undo2, Redo2, Grid3X3, Save, Trash2 
@@ -32,13 +33,41 @@
     selected?: boolean;
   }
   
+  // Data source types for child configuration
+  interface UserData {
+    id: string;
+    name: string;
+    email?: string;
+  }
+  
+  interface GroupData {
+    id: string;
+    name: string;
+  }
+  
+  interface SoundData {
+    id: string;
+    name: string;
+  }
+  
+  interface PhoneNumberData {
+    id: string;
+    name: string;
+    number: string;
+  }
+  
   interface Props {
     nodes: Writable<FlowNodeData[]>;
     edges: Writable<FlowEdgeData[]>;
+    // Data sources for child configuration
+    users?: UserData[];
+    groups?: GroupData[];
+    sounds?: SoundData[];
+    phoneNumbers?: PhoneNumberData[];
     onSave?: () => void;
   }
   
-  let { nodes, edges, onSave }: Props = $props();
+  let { nodes, edges, users = [], groups = [], sounds = [], phoneNumbers = [], onSave }: Props = $props();
   
   // Canvas state
   let canvasRef: HTMLDivElement | null = $state(null);
@@ -54,6 +83,8 @@
   let selectedNodeIds = $state<Set<string>>(new Set());
   let selectedEdgeIds = $state<Set<string>>(new Set());
   let activeNodeId = $state<string | null>(null);
+  let activeChildId = $state<string | null>(null); // ID of currently selected child item
+  let activeChildData = $state<Record<string, unknown> | null>(null); // Data for the child
   let showGrid = $state(true);
   let showNodePalette = $state(true);
   let showOptionsPanel = $state(false);
@@ -63,6 +94,8 @@
   let dragStartX = $state(0);
   let dragStartY = $state(0);
   let dragNodeStartPositions = $state<Map<string, { x: number; y: number }>>(new Map());
+  let dragOffsetX = $state(0);
+  let dragOffsetY = $state(0);
   
   // Edge creation state
   let isCreatingEdge = $state(false);
@@ -90,6 +123,16 @@
       unsubNodes();
       unsubEdges();
     };
+  });
+  
+  // Create a hash for nodes that affects edge rendering
+  // This will be different whenever node positions or children change
+  const nodesHash = $derived(() => {
+    return nodesData.map(n => {
+      const outputs = (n.data?.outputs as unknown[]) || [];
+      const subItems = (n.data?.subItems as unknown[]) || [];
+      return `${n.id}-${n.position.x}-${n.position.y}-${outputs.length}-${subItems.length}`;
+    }).join('|');
   });
   
   // Save history snapshot
@@ -183,13 +226,13 @@
     if (e.button !== 0) return; // Only handle left click
     
     const target = e.target as HTMLElement;
-    const isOnNode = target.closest('.flow-node');
-    const isOnHandle = target.closest('.node-handle');
+    const isOnNode = target.closest('.flow-node') || target.closest('.container-node');
+    const isOnHandle = target.closest('.node-handle') || target.closest('.child-output-handle');
     
     if (isOnHandle) {
       // Start edge creation
-      const handleEl = target.closest('.node-handle') as HTMLElement;
-      const nodeEl = target.closest('.flow-node') as HTMLElement;
+      const handleEl = (target.closest('.node-handle') || target.closest('.child-output-handle')) as HTMLElement;
+      const nodeEl = (target.closest('.flow-node') || target.closest('.container-node')) as HTMLElement;
       if (handleEl && nodeEl) {
         isCreatingEdge = true;
         edgeSourceNodeId = nodeEl.dataset.nodeId || null;
@@ -202,7 +245,7 @@
     
     if (isOnNode) {
       // Handle node selection/dragging
-      const nodeEl = target.closest('.flow-node') as HTMLElement;
+      const nodeEl = (target.closest('.flow-node') || target.closest('.container-node')) as HTMLElement;
       const nodeId = nodeEl?.dataset.nodeId;
       
       if (nodeId) {
@@ -250,13 +293,61 @@
     }
   }
   
+  // Throttle for drag updates
+  let dragRafId: number | null = null;
+  
   function handleCanvasMouseMove(e: MouseEvent) {
     if (isPanning) {
       viewportX = e.clientX - panStartX;
       viewportY = e.clientY - panStartY;
     } else if (isDragging && selectedNodeIds.size > 0) {
-      const dx = (e.clientX - dragStartX) / zoom;
-      const dy = (e.clientY - dragStartY) / zoom;
+      // Calculate delta
+      dragOffsetX = (e.clientX - dragStartX) / zoom;
+      dragOffsetY = (e.clientY - dragStartY) / zoom;
+      
+      // Use requestAnimationFrame to batch updates for smoother dragging
+      if (dragRafId === null) {
+        dragRafId = requestAnimationFrame(() => {
+          const dx = dragOffsetX;
+          const dy = dragOffsetY;
+          
+          nodes.update(currentNodes => {
+            return currentNodes.map(node => {
+              if (selectedNodeIds.has(node.id)) {
+                const startPos = dragNodeStartPositions.get(node.id);
+                if (startPos) {
+                  return {
+                    ...node,
+                    position: {
+                      x: startPos.x + dx,
+                      y: startPos.y + dy
+                    }
+                  };
+                }
+              }
+              return node;
+            });
+          });
+          
+          dragRafId = null;
+        });
+      }
+    } else if (isCreatingEdge) {
+      edgePreviewEnd = screenToCanvas(e.clientX, e.clientY);
+    }
+  }
+  
+  function handleCanvasMouseUp(e: MouseEvent) {
+    // Cancel any pending drag RAF
+    if (dragRafId !== null) {
+      cancelAnimationFrame(dragRafId);
+      dragRafId = null;
+    }
+    
+    if (isDragging) {
+      // Apply final position
+      const dx = dragOffsetX;
+      const dy = dragOffsetY;
       
       nodes.update(currentNodes => {
         return currentNodes.map(node => {
@@ -275,21 +366,17 @@
           return node;
         });
       });
-    } else if (isCreatingEdge) {
-      edgePreviewEnd = screenToCanvas(e.clientX, e.clientY);
-    }
-  }
-  
-  function handleCanvasMouseUp(e: MouseEvent) {
-    if (isDragging) {
+      
       saveHistory();
+      dragOffsetX = 0;
+      dragOffsetY = 0;
     }
     
     if (isCreatingEdge && edgePreviewEnd) {
       // Check if we're over a target handle
       const target = e.target as HTMLElement;
-      const handleEl = target.closest('.node-handle') as HTMLElement;
-      const nodeEl = target.closest('.flow-node') as HTMLElement;
+      const handleEl = (target.closest('.node-handle') || target.closest('.child-output-handle')) as HTMLElement;
+      const nodeEl = (target.closest('.flow-node') || target.closest('.container-node')) as HTMLElement;
       
       if (handleEl && nodeEl && edgeSourceNodeId) {
         const targetNodeId = nodeEl.dataset.nodeId;
@@ -347,7 +434,115 @@
   // Node event handlers
   function handleNodeDoubleClick(nodeId: string) {
     activeNodeId = nodeId;
+    activeChildId = null; // Clear child selection when selecting a node
+    activeChildData = null;
     showOptionsPanel = true;
+  }
+  
+  // Handle double-click on a child item within a container
+  function handleChildDoubleClick(nodeId: string, childId: string, childData: Record<string, unknown>) {
+    activeNodeId = nodeId; // Keep track of parent node
+    activeChildId = childId;
+    activeChildData = childData;
+    showOptionsPanel = true;
+  }
+  
+  // Handle going back to parent from child view
+  function handleBackToParent() {
+    activeChildId = null;
+    activeChildData = null;
+  }
+  
+  // Handle moving a child up in the list
+  function handleMoveChildUp() {
+    if (!activeNodeId || !activeChildId) return;
+    
+    saveHistory();
+    
+    nodes.update(currentNodes => 
+      currentNodes.map(n => {
+        if (n.id !== activeNodeId) return n;
+        
+        const outputs = [...(n.data.outputs as unknown[] || [])];
+        const childIndex = outputs.findIndex((o: { id: string }) => o.id === activeChildId);
+        
+        if (childIndex > 0) {
+          // Swap with previous item
+          [outputs[childIndex - 1], outputs[childIndex]] = [outputs[childIndex], outputs[childIndex - 1]];
+        }
+        
+        return { ...n, data: { ...n.data, outputs } };
+      })
+    );
+  }
+  
+  // Handle moving a child down in the list
+  function handleMoveChildDown() {
+    if (!activeNodeId || !activeChildId) return;
+    
+    saveHistory();
+    
+    nodes.update(currentNodes => 
+      currentNodes.map(n => {
+        if (n.id !== activeNodeId) return n;
+        
+        const outputs = [...(n.data.outputs as unknown[] || [])];
+        const childIndex = outputs.findIndex((o: { id: string }) => o.id === activeChildId);
+        
+        if (childIndex >= 0 && childIndex < outputs.length - 1) {
+          // Swap with next item
+          [outputs[childIndex], outputs[childIndex + 1]] = [outputs[childIndex + 1], outputs[childIndex]];
+        }
+        
+        return { ...n, data: { ...n.data, outputs } };
+      })
+    );
+  }
+  
+  // Handle deleting a child
+  function handleDeleteChild() {
+    if (!activeNodeId || !activeChildId) return;
+    
+    saveHistory();
+    
+    nodes.update(currentNodes => 
+      currentNodes.map(n => {
+        if (n.id !== activeNodeId) return n;
+        
+        const outputs = (n.data.outputs as unknown[] || []).filter(
+          (o: { id: string }) => o.id !== activeChildId
+        );
+        
+        return { ...n, data: { ...n.data, outputs } };
+      })
+    );
+    
+    // Go back to parent after deleting
+    activeChildId = null;
+    activeChildData = null;
+  }
+  
+  // Handle updating a child's data
+  function handleChildUpdate(childId: string, updates: Record<string, unknown>) {
+    if (!activeNodeId) return;
+    
+    saveHistory();
+    
+    nodes.update(currentNodes => 
+      currentNodes.map(n => {
+        if (n.id !== activeNodeId) return n;
+        
+        const outputs = (n.data.outputs as unknown[] || []).map((o: { id: string; data?: Record<string, unknown> }) => {
+          if (o.id !== childId) return o;
+          return { ...o, ...updates, data: { ...(o.data || {}), ...updates } };
+        });
+        
+        return { ...n, data: { ...n.data, outputs } };
+      })
+    );
+    
+    // Update the local child data state
+    activeChildData = { ...activeChildData, ...updates };
   }
   
   function handleNodeDelete() {
@@ -399,6 +594,39 @@
     );
     
     selectedEdgeIds = new Set();
+  }
+  
+  // Handle "Click here to START" selection
+  function handleStartSelect(templateId: number, name: string) {
+    // Map templateId to node type
+    const templateMap: Record<number, string> = {
+      3: 'inboundNumber',
+      31: 'extensionNumber',
+      81: 'sipTrunk',
+      200: 'inboundMessage',
+      3100000: 'invokableDestination',
+    };
+    
+    const nodeType = templateMap[templateId] || 'inboundNumber';
+    
+    // Create new entry point node to the right of the start button
+    const newNode: FlowNodeData = {
+      id: `${nodeType}-${Date.now()}`,
+      type: nodeType,
+      position: { x: 300, y: 100 },
+      data: {
+        label: name.replace('Add ', ''),
+        name: name.replace('Add ', ''),
+      }
+    };
+    
+    nodes.update(currentNodes => [...currentNodes, newNode]);
+    saveHistory();
+    
+    // Select the new node and open options panel
+    selectedNodeIds = new Set([newNode.id]);
+    activeNodeId = newNode.id;
+    showOptionsPanel = true;
   }
   
   // Handle dropping new nodes from palette
@@ -471,58 +699,246 @@
     );
   }
   
+  // Container types that use the burger-style rendering
+  const containerTypes = [
+    'action', 'default', 'switchBoard', 'natterboxAI', 'finish', 
+    'toPolicy', 'fromPolicy', 'omniChannelFlow', 'inboundNumber',
+    'extensionNumber', 'digital', 'invokableDestination', 'sipTrunk',
+    'aiSupportChat', 'inboundMessage', 'ddi'
+  ];
+  
+  function isContainerNode(nodeType: string): boolean {
+    return containerTypes.includes(nodeType);
+  }
+  
   // Get node position for edge rendering
   function getNodeCenter(nodeId: string): { x: number; y: number } | null {
     const node = nodesData.find(n => n.id === nodeId);
     if (!node) return null;
-    const width = node.width || 150;
-    const height = node.height || 60;
+    const { width, height } = calculateNodeDimensions(node);
     return {
       x: node.position.x + width / 2,
       y: node.position.y + height / 2
     };
   }
   
-  // Calculate node dimensions using the same logic as FlowNode.svelte
+  // Calculate node dimensions - different for container vs simple nodes
   function calculateNodeDimensions(node: FlowNodeData): { width: number; height: number } {
-    const baseWidth = 150;
-    const baseHeight = 60;
-    const subItemHeight = 28;
-    const maxDisplayItems = 5;
-    
-    // Use stored dimensions if available
-    const width = node.width || baseWidth;
-    
-    // Calculate height based on sub-items and outputs (same logic as FlowNode.svelte)
     const subItems = (node.data?.subItems as unknown[]) || [];
     const outputs = (node.data?.outputs as unknown[]) || [];
-    const hasSubItems = subItems.length > 0 || outputs.length > 0;
+    const children = [...subItems, ...outputs];
     
-    let height: number;
-    if (node.height) {
-      height = node.height;
-    } else if (!hasSubItems) {
-      height = baseHeight;
+    if (isContainerNode(node.type)) {
+      // Container node dimensions (burger style)
+      const containerWidth = 200;
+      const headerHeight = 30;
+      const footerHeight = 30;
+      const childItemHeight = 32;
+      const dividerHeight = 1;
+      
+      const width = node.width || containerWidth;
+      
+      let height: number;
+      if (node.height) {
+        height = node.height;
+      } else if (children.length === 0) {
+        // Header + single divider + footer
+        height = headerHeight + dividerHeight + footerHeight;
+      } else {
+        // Header + divider + body + divider + footer
+        const bodyHeight = children.length * childItemHeight;
+        height = headerHeight + dividerHeight + bodyHeight + dividerHeight + footerHeight;
+      }
+      
+      return { width, height };
     } else {
-      const itemCount = Math.min(subItems.length + outputs.length, maxDisplayItems);
-      height = baseHeight + (itemCount * subItemHeight);
+      // Simple node dimensions
+      const baseWidth = 150;
+      const baseHeight = 60;
+      const subItemHeight = 28;
+      const maxDisplayItems = 5;
+      
+      const width = node.width || baseWidth;
+      const hasSubItems = children.length > 0;
+      
+      let height: number;
+      if (node.height) {
+        height = node.height;
+      } else if (!hasSubItems) {
+        height = baseHeight;
+      } else {
+        const itemCount = Math.min(children.length, maxDisplayItems);
+        height = baseHeight + (itemCount * subItemHeight);
+      }
+      
+      return { width, height };
     }
-    
-    return { width, height };
   }
   
+  // Get handle position for edge connections
+  // Container nodes have input on upper bun and output on lower bun
   function getNodeHandlePosition(nodeId: string, handleType: string): { x: number; y: number } | null {
     const node = nodesData.find(n => n.id === nodeId);
     if (!node) return null;
     
     const { width, height } = calculateNodeDimensions(node);
     
-    // 'source' = right side of node (output), 'target' = left side of node (input)
-    if (handleType === 'source' || handleType === 'right') {
-      return { x: node.position.x + width, y: node.position.y + height / 2 };
+    if (isContainerNode(node.type)) {
+      // Container node: input handle at top-left, output handle at bottom-right
+      const headerHeight = 30;
+      const footerHeight = 30;
+      
+      if (handleType === 'source' || handleType === 'right') {
+        // Output handle is on the footer (lower bun)
+        return { x: node.position.x + width, y: node.position.y + height - (footerHeight / 2) };
+      } else {
+        // Input handle is on the header (upper bun)
+        return { x: node.position.x, y: node.position.y + (headerHeight / 2) };
+      }
     } else {
-      return { x: node.position.x, y: node.position.y + height / 2 };
+      // Simple node: handles at vertical center
+      if (handleType === 'source' || handleType === 'right') {
+        return { x: node.position.x + width, y: node.position.y + height / 2 };
+      } else {
+        return { x: node.position.x, y: node.position.y + height / 2 };
+      }
     }
+  }
+  
+  // ===== Options Panel Callbacks =====
+  
+  // Create a new container node linked to the current node's output
+  function handleCreateLink(containerType: string) {
+    if (!activeNodeId) return;
+    
+    const sourceNode = nodesData.find(n => n.id === activeNodeId);
+    if (!sourceNode) return;
+    
+    saveHistory();
+    
+    const { width: sourceWidth } = calculateNodeDimensions(sourceNode);
+    
+    // Create new container node positioned to the right
+    const newNode: FlowNodeData = {
+      id: `${containerType}-${Date.now()}`,
+      type: containerType,
+      position: {
+        x: sourceNode.position.x + sourceWidth + 100,
+        y: sourceNode.position.y
+      },
+      data: {
+        label: containerType.charAt(0).toUpperCase() + containerType.slice(1),
+      }
+    };
+    
+    // Create edge from source to new node
+    const newEdge: FlowEdgeData = {
+      id: `edge-${Date.now()}`,
+      source: activeNodeId,
+      target: newNode.id,
+      sourceHandle: 'default',
+      targetHandle: 'target'
+    };
+    
+    nodes.update(currentNodes => [...currentNodes, newNode]);
+    edges.update(currentEdges => [...currentEdges, newEdge]);
+    
+    // Select the new node
+    selectedNodeIds = new Set([newNode.id]);
+    activeNodeId = newNode.id;
+  }
+  
+  // Link current node to an existing container
+  function handleLinkToExisting(targetNodeId: string) {
+    if (!activeNodeId || activeNodeId === targetNodeId) return;
+    
+    saveHistory();
+    
+    const newEdge: FlowEdgeData = {
+      id: `edge-${Date.now()}`,
+      source: activeNodeId,
+      target: targetNodeId,
+      sourceHandle: 'default',
+      targetHandle: 'target'
+    };
+    
+    edges.update(currentEdges => [...currentEdges, newEdge]);
+  }
+  
+  // Add a child app to the current container node
+  function handleAddApp(appType: string) {
+    if (!activeNodeId) return;
+    
+    const parentNode = nodesData.find(n => n.id === activeNodeId);
+    if (!parentNode) return;
+    
+    saveHistory();
+    
+    // Create a new child item (output) in the parent node
+    const newChildId = `child-${Date.now()}`;
+    const newChild = {
+      id: newChildId,
+      name: appType.charAt(0).toUpperCase() + appType.slice(1),
+      title: appType.charAt(0).toUpperCase() + appType.slice(1),
+      templateClass: `Mod${appType.charAt(0).toUpperCase() + appType.slice(1)}`,
+      data: {
+        label: appType.charAt(0).toUpperCase() + appType.slice(1),
+        type: appType
+      }
+    };
+    
+    const currentOutputs = (parentNode.data?.outputs as unknown[]) || [];
+    
+    nodes.update(currentNodes =>
+      currentNodes.map(n =>
+        n.id === activeNodeId 
+          ? { ...n, data: { ...n.data, outputs: [...currentOutputs, newChild] } }
+          : n
+      )
+    );
+  }
+  
+  // Delete the currently selected/active node
+  function handleDeleteActiveNode() {
+    if (activeNodeId) {
+      selectedNodeIds = new Set([activeNodeId]);
+      handleNodeDelete();
+    }
+  }
+  
+  // Handle dropping an app onto a container node
+  function handleAppDrop(nodeId: string, appType: string, appLabel: string) {
+    saveHistory();
+    
+    // Create a new child item (output) in the container node
+    const newChildId = `child-${Date.now()}`;
+    const newChild = {
+      id: newChildId,
+      name: appLabel,
+      title: appLabel,
+      templateClass: `Mod${appType.charAt(0).toUpperCase() + appType.slice(1)}`,
+      data: {
+        label: appLabel,
+        type: appType
+      }
+    };
+    
+    nodes.update(currentNodes =>
+      currentNodes.map(n => {
+        if (n.id !== nodeId) return n;
+        
+        const currentOutputs = (n.data?.outputs as unknown[]) || [];
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            outputs: [...currentOutputs, newChild]
+          }
+        };
+      })
+    );
+    
+    console.log(`[FlowEditor] Added app "${appLabel}" (${appType}) to node "${nodeId}"`);
   }
   
   // Initialize history
@@ -700,8 +1116,8 @@
             </marker>
           </defs>
           
-          <!-- Render edges -->
-          {#each edgesData as edge (edge.id)}
+          <!-- Render edges - use nodesHash to force re-render when nodes change -->
+          {#each edgesData as edge (`${edge.id}-${nodesHash()}`)}
             {@const sourcePos = getNodeHandlePosition(edge.source, 'source')}
             {@const targetPos = getNodeHandlePosition(edge.target, 'target')}
             {#if sourcePos && targetPos}
@@ -732,12 +1148,20 @@
           {/if}
         </svg>
         
+        <!-- "Click here to START" button - always visible to add entry points -->
+        <StartButton 
+          onSelect={handleStartSelect}
+          position={{ x: 50, y: 100 }}
+        />
+        
         <!-- Render nodes -->
         {#each nodesData as node (node.id)}
           <FlowNode 
             {node}
             selected={selectedNodeIds.has(node.id)}
             onDoubleClick={() => handleNodeDoubleClick(node.id)}
+            onChildDoubleClick={(childId, childData) => handleChildDoubleClick(node.id, childId, childData)}
+            onAppDrop={handleAppDrop}
           />
         {/each}
       </div>
@@ -761,8 +1185,24 @@
     {#if activeNode}
       <NodeOptionsPanel 
         node={activeNode}
+        allNodes={nodesData}
+        activeChildId={activeChildId}
+        activeChildData={activeChildData}
+        {users}
+        {groups}
+        {sounds}
+        {phoneNumbers}
         onUpdate={(updates) => handleNodeUpdate(activeNodeId!, updates)}
-        onClose={() => { showOptionsPanel = false; activeNodeId = null; }}
+        onChildUpdate={(childId, updates) => handleChildUpdate(childId, updates)}
+        onClose={() => { showOptionsPanel = false; activeNodeId = null; activeChildId = null; activeChildData = null; }}
+        onCreateLink={handleCreateLink}
+        onLinkToExisting={handleLinkToExisting}
+        onAddApp={handleAddApp}
+        onDeleteNode={handleDeleteActiveNode}
+        onBackToParent={handleBackToParent}
+        onMoveChildUp={handleMoveChildUp}
+        onMoveChildDown={handleMoveChildDown}
+        onDeleteChild={handleDeleteChild}
       />
     {/if}
   {/if}
