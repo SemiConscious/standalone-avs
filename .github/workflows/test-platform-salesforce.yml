@@ -1,0 +1,61 @@
+name: Test Platform Salesforce Package
+
+on:
+  push:
+    branches:
+      - '**'
+      - '!develop'
+      - '!master'
+      - '!main'
+    paths:
+      - 'packages/platform-salesforce/**'
+      - 'packages/core/**'  # Depends on core
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/test-platform-salesforce.yml'
+  pull_request:
+    paths:
+      - 'packages/platform-salesforce/**'
+      - 'packages/core/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/test-platform-salesforce.yml'
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  test-platform-salesforce:
+    name: Platform Salesforce Unit Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Platform Salesforce Tests
+        run: pnpm --filter @avs/platform-salesforce test
+
+      - name: Run Platform Salesforce Tests with Coverage
+        run: pnpm --filter @avs/platform-salesforce test -- --coverage
+        continue-on-error: true
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: platform-salesforce-coverage
+          path: packages/platform-salesforce/coverage/
+          retention-days: 7
+

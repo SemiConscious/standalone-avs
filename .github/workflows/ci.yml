@@ -1,0 +1,130 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - develop
+      - master
+      - main
+  pull_request:
+    branches:
+      - develop
+      - master
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Lint and type-check all packages
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Sync SvelteKit
+        run: pnpm --filter @avs/web exec svelte-kit sync
+
+      - name: Run ESLint
+        run: pnpm lint
+
+      - name: Type Check Web Package
+        run: pnpm --filter @avs/web check
+
+  # Run all unit tests
+  test-core:
+    name: Core Tests
+    uses: ./.github/workflows/test-core.yml
+
+  test-platform-salesforce:
+    name: Platform Salesforce Tests
+    uses: ./.github/workflows/test-platform-salesforce.yml
+
+  test-web:
+    name: Web Tests
+    uses: ./.github/workflows/test-web.yml
+
+  # Run E2E tests
+  test-e2e:
+    name: E2E Tests
+    needs: [lint, test-core, test-platform-salesforce, test-web]
+    uses: ./.github/workflows/test-e2e.yml
+
+  # Build all packages
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [lint]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Sync SvelteKit
+        run: pnpm --filter @avs/web exec svelte-kit sync
+
+      - name: Build all packages
+        run: pnpm -r build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: |
+            packages/core/dist/
+            packages/platform-salesforce/dist/
+            packages/web/.svelte-kit/
+            packages/web/build/
+          retention-days: 7
+
+  # Final status check
+  ci-success:
+    name: CI Success
+    runs-on: ubuntu-latest
+    needs: [lint, test-core, test-platform-salesforce, test-web, test-e2e, build]
+    if: always()
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [[ "${{ needs.lint.result }}" != "success" ]] || \
+             [[ "${{ needs.test-core.result }}" != "success" ]] || \
+             [[ "${{ needs.test-platform-salesforce.result }}" != "success" ]] || \
+             [[ "${{ needs.test-web.result }}" != "success" ]] || \
+             [[ "${{ needs.test-e2e.result }}" != "success" ]] || \
+             [[ "${{ needs.build.result }}" != "success" ]]; then
+            echo "One or more jobs failed"
+            exit 1
+          fi
+          echo "All jobs passed successfully!"
+

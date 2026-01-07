@@ -133,30 +133,57 @@ After obtaining your credentials, create a `.env` file in the **`packages/web/`*
 ```bash
 # File: packages/web/.env
 
-# Salesforce OAuth Configuration
-SF_CLIENT_ID=your-consumer-key-here
-SF_CLIENT_SECRET=your-consumer-secret-here
-SF_REDIRECT_URI=http://localhost:5173/auth/callback
-SF_LOGIN_URL=https://login.salesforce.com
+# =============================================================================
+# APPLICATION MODE
+# =============================================================================
+# Set to "true" to enable demo mode with sample data
+PUBLIC_DEMO_MODE=false
+
+# =============================================================================
+# SALESFORCE OAUTH CONFIGURATION (Required)
+# =============================================================================
+SALESFORCE_CLIENT_ID=your-consumer-key-here
+SALESFORCE_CLIENT_SECRET=your-consumer-secret-here
+PUBLIC_OAUTH_CALLBACK_URL=http://localhost:5173/auth/callback
+SALESFORCE_LOGIN_URL=https://login.salesforce.com
+
+# =============================================================================
+# SAPIEN API CONFIGURATION (Optional - for direct API calls)
+# =============================================================================
+# Only needed for real-time features like call status monitoring
+# JWT authentication is handled automatically via Salesforce
+# Organization ID is extracted from the JWT automatically
+
+SAPIEN_HOST=https://api.natterbox.com/v1
 ```
 
 > **Note**: The `.env` file must be in `packages/web/` (where the SvelteKit app runs), not the repository root.
 
-### Environment Variable Reference
+### Salesforce Environment Variables (Required)
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `SF_CLIENT_ID` | Consumer Key from your Salesforce app | **Required** |
-| `SF_CLIENT_SECRET` | Consumer Secret from your Salesforce app | **Required** |
-| `SF_REDIRECT_URI` | OAuth callback URL | `http://localhost:5173/auth/callback` |
-| `SF_LOGIN_URL` | Salesforce login endpoint | `https://login.salesforce.com` |
+| `SALESFORCE_CLIENT_ID` | Consumer Key from your Salesforce app | **Required** |
+| `SALESFORCE_CLIENT_SECRET` | Consumer Secret from your Salesforce app | **Required** |
+| `PUBLIC_OAUTH_CALLBACK_URL` | OAuth callback URL | `http://localhost:5173/auth/callback` |
+| `SALESFORCE_LOGIN_URL` | Salesforce login endpoint | `https://login.salesforce.com` |
+
+### Sapien API Environment Variables (Optional)
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `SAPIEN_HOST` | Sapien API endpoint for direct calls | For real-time features |
+
+> **Note**: 
+> - The **organization ID** is automatically extracted from the Sapien JWT payload
+> - Sapien credentials (client_id, client_secret, username, password) are **not needed** - they're stored in the Salesforce org's `API_v1__c` protected custom settings, and the Apex REST endpoint handles authentication internally
 
 ### For Salesforce Sandbox
 
 If using a sandbox org, change the login URL:
 
 ```bash
-SF_LOGIN_URL=https://test.salesforce.com
+SALESFORCE_LOGIN_URL=https://test.salesforce.com
 ```
 
 ---
@@ -262,6 +289,85 @@ DEMO_MODE=true
 ### Disabling Demo Mode
 
 Set `DEMO_MODE=false` or remove the variable to require real Salesforce authentication.
+
+---
+
+---
+
+## Sapien API Access
+
+The Sapien API provides access to Natterbox's core services for features like:
+
+- **Real-time call status** - Active calls, queue stats, agent availability
+- **Call recordings** - Playback and download recordings
+- **Direct user/device management** - Operations that require Natterbox API
+- **Call logs** - Direct access to call history
+
+### How It Works
+
+The standalone app **does not need separate Sapien credentials**. Instead, it leverages the existing Salesforce infrastructure:
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  Standalone App │     │   Salesforce    │     │ Sapien/Gatekeeper│
+└────────┬────────┘     └────────┬────────┘     └────────┬────────┘
+         │                       │                       │
+         │ 1. SF OAuth           │                       │
+         │ ─────────────────────>│                       │
+         │ <─── SF Access Token ─│                       │
+         │                       │                       │
+         │ 2. GET /apexrest/     │                       │
+         │    token/{scope}      │                       │
+         │ ─────────────────────>│ 3. Auth with stored   │
+         │                       │    Sapien credentials │
+         │                       │ ─────────────────────>│
+         │                       │ <─ Sapien token ──────│
+         │                       │                       │
+         │                       │ 4. Get JWT from       │
+         │                       │    Gatekeeper         │
+         │                       │ ─────────────────────>│
+         │                       │ <─ Sapien JWT ────────│
+         │                       │                       │
+         │ <─── Sapien JWT ──────│                       │
+         │                       │                       │
+         │ 5. Direct API calls   │                       │
+         │ ──────────────────────────────────────────────>
+```
+
+The Salesforce org has Sapien credentials stored in `API_v1__c` protected custom settings. The Apex REST endpoint `/services/apexrest/token/{scope}` handles the authentication internally and returns a user-specific Sapien JWT.
+
+### Available Scopes
+
+| Scope | Description |
+|-------|-------------|
+| `enduser:basic` | Basic end-user access (CTI, calls) |
+| `omni:basic` | Omni-channel basic access |
+| `omni:team-leader` | Omni-channel team leader access |
+| `omni:admin` | Omni-channel admin access |
+| `insights:basic` | AI Insights basic access |
+| `insights:team-leader` | AI Insights team leader access |
+| `insights:admin` | AI Insights admin access |
+
+### Optional: Direct Sapien Configuration
+
+For advanced features like real-time call status, you can optionally configure direct Sapien API access:
+
+```bash
+# packages/web/.env
+
+# Sapien API host (for direct API calls)
+SAPIEN_HOST=https://api.natterbox.com/v1
+```
+
+**Note:** The organization ID is automatically extracted from the Sapien JWT - no need to configure it separately!
+
+### Testing Sapien Access
+
+Visit `/api/sapien/status` to check:
+
+- Whether you have a valid Salesforce session
+- Whether JWT retrieval is working
+- What features are available
 
 ---
 

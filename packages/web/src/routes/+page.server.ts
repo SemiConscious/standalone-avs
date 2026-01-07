@@ -43,6 +43,8 @@ async function fetchSalesforceCount(
 
   const url = `${instanceUrl}/services/data/v62.0/query?q=${encodeURIComponent(query)}`;
 
+  console.log(`[Salesforce Query] ${query}`);
+
   const response = await fetch(url, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -51,11 +53,13 @@ async function fetchSalesforceCount(
   });
 
   if (!response.ok) {
-    console.error(`Failed to fetch count for ${objectName}:`, await response.text());
+    const errorText = await response.text();
+    console.error(`[Salesforce Error] ${objectName}: ${response.status} - ${errorText}`);
     return 0;
   }
 
   const result = (await response.json()) as SoqlCountResult;
+  console.log(`[Salesforce Result] ${objectName}: ${result.totalSize} records`);
   return result.totalSize;
 }
 
@@ -77,11 +81,12 @@ export const load: PageServerLoad = async ({ locals }) => {
 
   try {
     // Fetch counts from Salesforce in parallel
+    // Objects use the 'nbavs' namespace prefix
     const [totalUsers, activeGroups, registeredDevices, activeCallFlows] = await Promise.all([
-      fetchSalesforceCount(locals.instanceUrl, locals.accessToken, 'User__c'),
-      fetchSalesforceCount(locals.instanceUrl, locals.accessToken, 'Group__c'),
-      fetchSalesforceCount(locals.instanceUrl, locals.accessToken, 'Device__c'),
-      fetchSalesforceCount(locals.instanceUrl, locals.accessToken, 'CallFlow__c', "Status__c = 'Active'"),
+      fetchSalesforceCount(locals.instanceUrl, locals.accessToken, 'nbavs__User__c'),
+      fetchSalesforceCount(locals.instanceUrl, locals.accessToken, 'nbavs__Group__c'),
+      fetchSalesforceCount(locals.instanceUrl, locals.accessToken, 'nbavs__Device__c'),
+      fetchSalesforceCount(locals.instanceUrl, locals.accessToken, 'nbavs__CallFlow__c', "nbavs__Status__c = 'Enabled'"),
     ]);
 
     const stats: DashboardStats = {

@@ -30,14 +30,20 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
     error(400, 'Missing PKCE code verifier');
   }
 
+  // Get stored redirect URI (must match the one used in authorization request)
+  const storedRedirectUri = cookies.get('oauth_redirect_uri');
+
   // Clear OAuth cookies
   cookies.delete('oauth_state', { path: '/' });
   cookies.delete('oauth_code_verifier', { path: '/' });
+  cookies.delete('oauth_redirect_uri', { path: '/' });
 
   // Get environment variables
   const clientId = env.SF_CLIENT_ID;
   const clientSecret = env.SF_CLIENT_SECRET;
-  const redirectUri = env.SF_REDIRECT_URI || 'http://localhost:5173/auth/callback';
+  // Use the stored redirect URI from the authorization request, or fall back to current URL
+  const defaultRedirectUri = `${url.origin}/auth/callback`;
+  const redirectUri = storedRedirectUri || env.SF_REDIRECT_URI || defaultRedirectUri;
   const loginUrl = env.SF_LOGIN_URL || 'https://login.salesforce.com';
 
   if (!clientId) {

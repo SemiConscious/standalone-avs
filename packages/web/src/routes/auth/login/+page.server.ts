@@ -36,10 +36,12 @@ function base64UrlEncode(buffer: Uint8Array): string {
 }
 
 export const actions: Actions = {
-  default: async ({ cookies }) => {
+  default: async ({ cookies, url }) => {
     // Validate required environment variables
     const clientId = env.SF_CLIENT_ID;
-    const redirectUri = env.SF_REDIRECT_URI || 'http://localhost:5173/auth/callback';
+    // Build redirect URI from current request URL for dev mode flexibility
+    const defaultRedirectUri = `${url.origin}/auth/callback`;
+    const redirectUri = env.SF_REDIRECT_URI || defaultRedirectUri;
     const loginUrl = env.SF_LOGIN_URL || 'https://login.salesforce.com';
 
     if (!clientId) {
@@ -65,6 +67,7 @@ export const actions: Actions = {
 
     cookies.set('oauth_state', state, cookieOptions);
     cookies.set('oauth_code_verifier', codeVerifier, cookieOptions);
+    cookies.set('oauth_redirect_uri', redirectUri, cookieOptions);
 
     // Build Salesforce OAuth authorization URL with PKCE
     const authUrl = new URL(`${loginUrl}/services/oauth2/authorize`);
