@@ -17,9 +17,9 @@
     "@avs/platform-salesforce": "workspace:*",
     "@skeletonlabs/skeleton": "^4.9.0",
     "@skeletonlabs/tw-plugin": "^0.4.1",
-    "@xyflow/svelte": "^0.1.39",
+    "@xyflow/svelte": "^1.5.0",
     "lodash-es": "^4.17.22",
-    "lucide-svelte": "^0.468.0",
+    "lucide-svelte": "^0.562.0",
     "uuid": "^13.0.0"
   },
   "devDependencies": {
@@ -36,13 +36,13 @@
     "@types/node": "^22.10.2",
     "@types/uuid": "^11.0.0",
     "autoprefixer": "^10.4.20",
-    "jsdom": "^25.0.1",
+    "jsdom": "^27.4.0",
     "postcss": "^8.4.49",
     "svelte": "^5.46.1",
     "svelte-check": "^4.1.1",
-    "tailwindcss": "^3.4.17",
+    "tailwindcss": "^4.1.18",
     "typescript": "^5.7.2",
-    "vite": "^6.0.6",
+    "vite": "^7.3.1",
     "vitest": "^4.0.16"
   }
 }
