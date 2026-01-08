@@ -1,12 +1,15 @@
 import { querySalesforce, hasValidCredentials, createSalesforce, deleteSalesforce, updateSalesforce } from '$lib/server/salesforce';
 import { 
-  getSapienJwt, 
-  getSapienOrganizationId, 
   createPolicyInSapien,
   deletePolicyFromSapien,
-  canGetSapienJwt,
   SAPIEN_SCOPES 
 } from '$lib/server/sapien';
+import { 
+  canUseSapienApi, 
+  getJwt, 
+  getOrganizationId,
+  getSapienHost 
+} from '$lib/server/gatekeeper';
 import { env } from '$env/dynamic/private';
 import type { PageServerLoad, Actions } from './$types';
 import { fail, redirect } from '@sveltejs/kit';
@@ -259,20 +262,22 @@ export const actions: Actions = {
 
       // ========== CREATE IN SAPIEN FIRST ==========
       // This gets us the Natterbox policy ID
-      const sapienHost = env.SAPIEN_HOST;
       let natterboxId: number | null = null;
       
-      if (sapienHost && canGetSapienJwt(locals)) {
+      if (canUseSapienApi(locals)) {
         try {
-          const jwt = await getSapienJwt(
+          // Get JWT with routing-policies:admin scope for policy management
+          const jwt = await getJwt(
             locals.instanceUrl!,
             locals.accessToken!,
-            SAPIEN_SCOPES.ROUTING_POLICIES_ADMIN
+            SAPIEN_SCOPES.ROUTING_POLICIES_ADMIN,
+            locals.user?.id
           );
           
-          const organizationId = getSapienOrganizationId();
+          const organizationId = getOrganizationId();
+          const sapienHost = getSapienHost();
           
-          if (organizationId) {
+          if (organizationId && sapienHost) {
             console.log(`[Sapien Create] Creating policy in org ${organizationId}`);
             
             const sapienResult = await createPolicyInSapien(
@@ -370,19 +375,20 @@ export const actions: Actions = {
       }
 
       // ========== DELETE FROM SAPIEN ==========
-      const sapienHost = env.SAPIEN_HOST;
-      
-      if (sapienHost && canGetSapienJwt(locals) && natterboxId) {
+      if (canUseSapienApi(locals) && natterboxId) {
         try {
-          const jwt = await getSapienJwt(
+          // Get JWT with routing-policies:admin scope for policy management
+          const jwt = await getJwt(
             locals.instanceUrl!,
             locals.accessToken!,
-            SAPIEN_SCOPES.ROUTING_POLICIES_ADMIN
+            SAPIEN_SCOPES.ROUTING_POLICIES_ADMIN,
+            locals.user?.id
           );
           
-          const organizationId = getSapienOrganizationId();
+          const organizationId = getOrganizationId();
+          const sapienHost = getSapienHost();
           
-          if (organizationId) {
+          if (organizationId && sapienHost) {
             console.log(`[Sapien Delete] Deleting policy ${natterboxId} from org ${organizationId}`);
             await deletePolicyFromSapien(sapienHost, jwt, organizationId, natterboxId);
             console.log(`[Sapien Delete] Successfully deleted policy ${natterboxId}`);

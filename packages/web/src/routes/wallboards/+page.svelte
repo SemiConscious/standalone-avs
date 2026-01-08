@@ -66,7 +66,7 @@
       <p class="text-sm">Connected to Sapien API - wallboards can show real-time call data.</p>
     </div>
   {:else if !data.error}
-    <div class="bg-accent/10 border border-accent/20 text-accent rounded-base p-4 flex items-center gap-3">
+    <div class="bg-info/10 border border-info/20 text-info rounded-base p-4 flex items-center gap-3">
       <AlertCircle class="w-5 h-5 flex-shrink-0" />
       <p class="text-sm">For live wallboard data, configure SAPIEN_HOST environment variable.</p>
     </div>
@@ -83,7 +83,7 @@
   <!-- Page Header -->
   <div class="flex items-center justify-between">
     <div>
-      <h1 class="text-2xl font-bold">Wallboards</h1>
+      <h1 class="text-2xl font-bold text-text-primary">Wallboards</h1>
       <p class="text-text-secondary mt-1">
         Customizable real-time dashboards for contact center monitoring
         {#if data.totalCount > 0}
@@ -100,7 +100,7 @@
   <!-- Wallboard Grid -->
   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
     {#each data.wallboards as wallboard}
-      <Card class="group hover:border-accent transition-colors">
+      <Card class="group hover:border-primary-500/50 transition-colors">
         <div class="aspect-video bg-bg-secondary rounded-base mb-4 flex items-center justify-center relative overflow-hidden">
           <LayoutGrid class="w-12 h-12 text-text-secondary" />
           <!-- Action buttons on hover -->
@@ -117,7 +117,7 @@
         <div class="flex items-start justify-between gap-2">
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2">
-              <h3 class="font-semibold truncate">{wallboard.name}</h3>
+              <h3 class="font-semibold truncate text-text-primary">{wallboard.name}</h3>
               {#if wallboard.isPublic}
                 <Eye class="w-4 h-4 text-text-secondary flex-shrink-0" title="Public" />
               {:else}
@@ -162,7 +162,7 @@
 
     <!-- Create New Wallboard Card -->
     <a href="/wallboards/new" class="block">
-      <Card class="border-dashed hover:border-accent transition-colors cursor-pointer h-full">
+      <Card class="border-dashed hover:border-primary-500/50 transition-colors cursor-pointer h-full">
         <div class="aspect-video flex flex-col items-center justify-center text-text-secondary">
           <Plus class="w-8 h-8 mb-2" />
           <p>Create New Wallboard</p>

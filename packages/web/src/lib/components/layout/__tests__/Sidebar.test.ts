@@ -31,7 +31,7 @@ describe('Sidebar Component', () => {
       expect(screen.getByText('User Home')).toBeInTheDocument();
       expect(screen.getByText('Account Settings')).toBeInTheDocument();
       expect(screen.getByText('Natterbox Users')).toBeInTheDocument();
-      expect(screen.getByText('AI Advisor')).toBeInTheDocument();
+      expect(screen.getByText('Insights')).toBeInTheDocument();
       expect(screen.getByText('Phone Numbers')).toBeInTheDocument();
       expect(screen.getByText('Devices')).toBeInTheDocument();
       expect(screen.getByText('Groups')).toBeInTheDocument();
@@ -57,10 +57,10 @@ describe('Sidebar Component', () => {
       expect(link).toHaveAttribute('href', '/routing-policies');
     });
 
-    it('should have correct href for AI Advisor', () => {
+    it('should have correct href for Insights', () => {
       render(Sidebar);
-      const link = screen.getByText('AI Advisor').closest('a');
-      expect(link).toHaveAttribute('href', '/ai-advisor');
+      const link = screen.getByText('Insights').closest('a');
+      expect(link).toHaveAttribute('href', '/insights');
     });
   });
 

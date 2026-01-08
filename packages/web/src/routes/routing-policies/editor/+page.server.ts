@@ -1,6 +1,7 @@
 import type { PageServerLoad } from './$types';
 import { hasValidCredentials } from '$lib/server/salesforce';
-import { getSapienJwt, getSapienOrganizationId, canGetSapienJwt } from '$lib/server/sapien';
+import { canUseSapienApi, getJwt, getOrganizationId, getSapienHost } from '$lib/server/gatekeeper';
+import { SAPIEN_SCOPES } from '$lib/server/sapien';
 import { env } from '$env/dynamic/private';
 
 export interface EditorPageData {
@@ -35,23 +36,25 @@ export const load: PageServerLoad = async ({ locals }) => {
   // Try to get Sapien JWT to populate org ID
   let nbOrgId: string | null = null;
   
-  if (canGetSapienJwt(locals)) {
+  if (canUseSapienApi(locals)) {
     try {
       // Get JWT with routing-policies scope to ensure we have org ID
-      await getSapienJwt(
+      await getJwt(
         locals.instanceUrl!,
         locals.accessToken!,
-        'routing-policies:admin'
+        SAPIEN_SCOPES.ROUTING_POLICIES_ADMIN,
+        locals.user?.id
       );
-      nbOrgId = String(getSapienOrganizationId() || '');
+      nbOrgId = String(getOrganizationId() || '');
     } catch (e) {
       console.warn('Could not get Sapien JWT for routing policies:', e);
     }
   }
 
-  // Host URLs (production values)
+  // Host URLs (from API settings or production defaults)
+  const sapienHost = getSapienHost() || env.SAPIEN_HOST || 'https://sapien.redmatter.com';
   const hostURLs: Record<string, string> = {
-    'SapienHost': env.SAPIEN_HOST || 'https://sapien.redmatter.com',
+    'SapienHost': sapienHost,
     'GatekeeperHost': 'https://gatekeeper.redmatter.pub',
     'RoutingPolicyEditorHost': 'https://routing-policy-editor.natterbox.net',
     'CallFlowHost': 'https://callflow.redmatter.pub',

@@ -4,12 +4,11 @@
   import { get } from 'svelte/store';
   import FlowNode from './components/FlowNode.svelte';
   import FlowEdge from './components/FlowEdge.svelte';
-  import NodePalette from './components/NodePalette.svelte';
   import NodeOptionsPanel from './components/NodeOptionsPanel.svelte';
-  import StartButton from './components/StartButton.svelte';
   import { 
     ZoomIn, ZoomOut, Maximize2, MousePointer2, Hand, 
-    Undo2, Redo2, Grid3X3, Save, Trash2 
+    Undo2, Redo2, Grid3X3, Save, Trash2, ChevronDown,
+    Phone, PhoneIncoming, Globe, Server, Workflow
   } from 'lucide-svelte';
   
   // Types
@@ -65,9 +64,12 @@
     sounds?: SoundData[];
     phoneNumbers?: PhoneNumberData[];
     onSave?: () => void;
+    onDelete?: () => void;
+    isDeleting?: boolean;
+    canDelete?: boolean;
   }
   
-  let { nodes, edges, users = [], groups = [], sounds = [], phoneNumbers = [], onSave }: Props = $props();
+  let { nodes, edges, users = [], groups = [], sounds = [], phoneNumbers = [], onSave, onDelete, isDeleting = false, canDelete = false }: Props = $props();
   
   // Canvas state
   let canvasRef: HTMLDivElement | null = $state(null);
@@ -86,7 +88,6 @@
   let activeChildId = $state<string | null>(null); // ID of currently selected child item
   let activeChildData = $state<Record<string, unknown> | null>(null); // Data for the child
   let showGrid = $state(true);
-  let showNodePalette = $state(true);
   let showOptionsPanel = $state(false);
   
   // Dragging state
@@ -106,6 +107,9 @@
   // History for undo/redo
   let history = $state<Array<{ nodes: FlowNodeData[]; edges: FlowEdgeData[] }>>([]);
   let historyIndex = $state(-1);
+  
+  // Start button dropdown state
+  let showStartDropdown = $state(false);
   
   // Get data from stores
   let nodesData = $state<FlowNodeData[]>(get(nodes));
@@ -133,6 +137,78 @@
       const subItems = (n.data?.subItems as unknown[]) || [];
       return `${n.id}-${n.position.x}-${n.position.y}-${outputs.length}-${subItems.length}`;
     }).join('|');
+  });
+  
+  // Compute which source handles/node IDs have edges going out from them
+  // Used to style connectors (connected vs unconnected)
+  const connectedChildIds = $derived(() => {
+    const connected = new Set<string>();
+    
+    for (const edge of edgesData) {
+      if (edge.sourceHandle) {
+        // Edge from a specific handle (child connector)
+        connected.add(edge.sourceHandle);
+      } else {
+        // Edge from default/footer connector - add the source node ID
+        // so we can check if the footer is connected
+        connected.add(edge.source);
+        connected.add('default');
+      }
+    }
+    
+    return connected;
+  });
+  
+  // Compute which nodes have edges from their footer (not from children)
+  // A footer edge exists if there's an edge from this node whose target 
+  // is NOT claimed by any child's connectedTo
+  const footerConnectedNodeIds = $derived(() => {
+    const footerConnected = new Set<string>();
+    
+    for (const node of nodesData) {
+      // Get all children's connectedTo values for this node
+      const outputs = (node.data?.outputs as Array<{ connectedTo?: string }>) || [];
+      const childTargets = new Set(
+        outputs
+          .map(o => o.connectedTo)
+          .filter((ct): ct is string => Boolean(ct && ct !== 'finish' && ct !== 'null'))
+      );
+      
+      // Find edges from this node
+      const nodeEdges = edgesData.filter(e => e.source === node.id);
+      
+      // Check if any edge target is NOT claimed by a child
+      for (const edge of nodeEdges) {
+        if (!childTargets.has(edge.target)) {
+          // This edge comes from the footer, not a child
+          footerConnected.add(node.id);
+          break;
+        }
+      }
+    }
+    
+    return footerConnected;
+  });
+  
+  // Compute which nodes have incoming edges (for input connector styling)
+  const inputConnectedNodeIds = $derived(() => {
+    const inputConnected = new Set<string>();
+    for (const edge of edgesData) {
+      inputConnected.add(edge.target);
+    }
+    return inputConnected;
+  });
+  
+  // Track which entry point types already exist in the policy
+  const existingEntryPointTypes = $derived(() => {
+    const entryPointTypes = ['inboundNumber', 'extensionNumber', 'invokableDestination', 'sipTrunk', 'fromPolicy'];
+    const existing = new Set<string>();
+    for (const node of nodesData) {
+      if (entryPointTypes.includes(node.type)) {
+        existing.add(node.type);
+      }
+    }
+    return existing;
   });
   
   // Save history snapshot
@@ -236,7 +312,8 @@
       if (handleEl && nodeEl) {
         isCreatingEdge = true;
         edgeSourceNodeId = nodeEl.dataset.nodeId || null;
-        edgeSourceHandle = handleEl.dataset.handleType || 'source';
+        // Use handleId (child ID) if present, otherwise fall back to handleType or 'source'
+        edgeSourceHandle = handleEl.dataset.handleId || handleEl.dataset.handleType || 'source';
         const canvasPos = screenToCanvas(e.clientX, e.clientY);
         edgePreviewEnd = canvasPos;
       }
@@ -375,7 +452,7 @@
     if (isCreatingEdge && edgePreviewEnd) {
       // Check if we're over a target handle
       const target = e.target as HTMLElement;
-      const handleEl = (target.closest('.node-handle') || target.closest('.child-output-handle')) as HTMLElement;
+      const handleEl = (target.closest('.node-handle') || target.closest('.child-output-handle') || target.closest('.simple-handle')) as HTMLElement;
       const nodeEl = (target.closest('.flow-node') || target.closest('.container-node')) as HTMLElement;
       
       if (handleEl && nodeEl && edgeSourceNodeId) {
@@ -388,11 +465,31 @@
             id: `edge-${Date.now()}`,
             source: edgeSourceNodeId,
             target: targetNodeId,
-            sourceHandle: edgeSourceHandle || 'source',
+            sourceHandle: edgeSourceHandle || 'default',
             targetHandle: targetHandle
           };
           
           edges.update(currentEdges => [...currentEdges, newEdge]);
+          
+          // If the edge was created from a child output handle (not 'default' or 'source'),
+          // update the child's connectedTo property
+          if (edgeSourceHandle && edgeSourceHandle !== 'default' && edgeSourceHandle !== 'source') {
+            const childId = edgeSourceHandle;
+            nodes.update(currentNodes =>
+              currentNodes.map(n => {
+                if (n.id !== edgeSourceNodeId) return n;
+                
+                // Update the child's connectedTo in outputs
+                const outputs = (n.data?.outputs as Array<{ id: string; connectedTo?: string }>) || [];
+                const updatedOutputs = outputs.map(o => 
+                  o.id === childId ? { ...o, connectedTo: targetNodeId } : o
+                );
+                
+                return { ...n, data: { ...n.data, outputs: updatedOutputs } };
+              })
+            );
+          }
+          
           saveHistory();
         }
       }
@@ -587,46 +684,82 @@
   function handleEdgeDelete() {
     if (selectedEdgeIds.size === 0) return;
     
+    // Find all edges to delete to clear connectedTo properties
+    const edgesToDelete = edgesData.filter(e => selectedEdgeIds.has(e.id));
+    
     saveHistory();
     
     edges.update(currentEdges =>
       currentEdges.filter(e => !selectedEdgeIds.has(e.id))
     );
     
+    // Clear connectedTo for any children that were sources of deleted edges
+    const childUpdates = new Map<string, Set<string>>(); // nodeId -> Set of childIds to clear
+    for (const edge of edgesToDelete) {
+      if (edge.sourceHandle && edge.sourceHandle !== 'default' && edge.sourceHandle !== 'source') {
+        if (!childUpdates.has(edge.source)) {
+          childUpdates.set(edge.source, new Set());
+        }
+        childUpdates.get(edge.source)!.add(edge.sourceHandle);
+      }
+    }
+    
+    if (childUpdates.size > 0) {
+      nodes.update(currentNodes =>
+        currentNodes.map(n => {
+          const childIds = childUpdates.get(n.id);
+          if (!childIds) return n;
+          
+          const outputs = (n.data?.outputs as Array<{ id: string; connectedTo?: string }>) || [];
+          const updatedOutputs = outputs.map(o => 
+            childIds.has(o.id) ? { ...o, connectedTo: undefined } : o
+          );
+          
+          return { ...n, data: { ...n.data, outputs: updatedOutputs } };
+        })
+      );
+    }
+    
     selectedEdgeIds = new Set();
   }
   
-  // Handle "Click here to START" selection
-  function handleStartSelect(templateId: number, name: string) {
-    // Map templateId to node type
-    const templateMap: Record<number, string> = {
-      3: 'inboundNumber',
-      31: 'extensionNumber',
-      81: 'sipTrunk',
-      200: 'inboundMessage',
-      3100000: 'invokableDestination',
-    };
+  // Delete a single edge directly (from edge X button or right-click)
+  function handleDeleteSingleEdge(edgeId: string) {
+    // Find the edge to get source info before deleting
+    const edgeToDelete = edgesData.find(e => e.id === edgeId);
     
-    const nodeType = templateMap[templateId] || 'inboundNumber';
-    
-    // Create new entry point node to the right of the start button
-    const newNode: FlowNodeData = {
-      id: `${nodeType}-${Date.now()}`,
-      type: nodeType,
-      position: { x: 300, y: 100 },
-      data: {
-        label: name.replace('Add ', ''),
-        name: name.replace('Add ', ''),
-      }
-    };
-    
-    nodes.update(currentNodes => [...currentNodes, newNode]);
     saveHistory();
     
-    // Select the new node and open options panel
-    selectedNodeIds = new Set([newNode.id]);
-    activeNodeId = newNode.id;
-    showOptionsPanel = true;
+    edges.update(currentEdges =>
+      currentEdges.filter(e => e.id !== edgeId)
+    );
+    
+    // If the edge had a sourceHandle (came from a child), clear that child's connectedTo
+    if (edgeToDelete && edgeToDelete.sourceHandle && 
+        edgeToDelete.sourceHandle !== 'default' && edgeToDelete.sourceHandle !== 'source') {
+      const childId = edgeToDelete.sourceHandle;
+      const sourceNodeId = edgeToDelete.source;
+      
+      nodes.update(currentNodes =>
+        currentNodes.map(n => {
+          if (n.id !== sourceNodeId) return n;
+          
+          const outputs = (n.data?.outputs as Array<{ id: string; connectedTo?: string }>) || [];
+          const updatedOutputs = outputs.map(o => 
+            o.id === childId ? { ...o, connectedTo: undefined } : o
+          );
+          
+          return { ...n, data: { ...n.data, outputs: updatedOutputs } };
+        })
+      );
+    }
+    
+    // Clear selection if this edge was selected
+    if (selectedEdgeIds.has(edgeId)) {
+      const newSet = new Set(selectedEdgeIds);
+      newSet.delete(edgeId);
+      selectedEdgeIds = newSet;
+    }
   }
   
   // Handle dropping new nodes from palette
@@ -686,6 +819,15 @@
       selectedEdgeIds = new Set();
       activeNodeId = null;
       showOptionsPanel = false;
+      showStartDropdown = false;
+    }
+  }
+  
+  // Close dropdown when clicking outside
+  function handleDocumentClick(e: MouseEvent) {
+    const target = e.target as HTMLElement;
+    if (!target.closest('.start-dropdown-btn') && !target.closest('.start-dropdown-menu')) {
+      showStartDropdown = false;
     }
   }
   
@@ -777,7 +919,7 @@
   
   // Get handle position for edge connections
   // Container nodes have input on upper bun and output on lower bun
-  function getNodeHandlePosition(nodeId: string, handleType: string): { x: number; y: number } | null {
+  function getNodeHandlePosition(nodeId: string, handleType: string, handleId?: string, targetNodeId?: string): { x: number; y: number } | null {
     const node = nodesData.find(n => n.id === nodeId);
     if (!node) return null;
     
@@ -787,9 +929,30 @@
       // Container node: input handle at top-left, output handle at bottom-right
       const headerHeight = 30;
       const footerHeight = 30;
+      const childItemHeight = 32;
+      const dividerHeight = 1;
       
       if (handleType === 'source' || handleType === 'right') {
-        // Output handle is on the footer (lower bun)
+        const outputs = (node.data?.outputs as Array<{ id: string; connectedTo?: string }>) || [];
+        
+        // Try to find the child by handleId first
+        let childIndex = handleId && handleId !== 'default' && handleId !== 'source' 
+          ? outputs.findIndex(o => o.id === handleId)
+          : -1;
+        
+        // If not found by handleId, try to find by connectedTo matching the target
+        if (childIndex < 0 && targetNodeId) {
+          childIndex = outputs.findIndex(o => o.connectedTo === targetNodeId);
+        }
+        
+        if (childIndex >= 0) {
+          // Calculate Y position for this child's connector
+          // Y = node top + header + divider + (childIndex * childHeight) + (childHeight / 2)
+          const childY = node.position.y + headerHeight + dividerHeight + (childIndex * childItemHeight) + (childItemHeight / 2);
+          return { x: node.position.x + width, y: childY };
+        }
+        
+        // Default: output handle is on the footer (lower bun)
         return { x: node.position.x + width, y: node.position.y + height - (footerHeight / 2) };
       } else {
         // Input handle is on the header (upper bun)
@@ -803,6 +966,40 @@
         return { x: node.position.x, y: node.position.y + height / 2 };
       }
     }
+  }
+  
+  // ===== Start Button - Add Entry Point Node =====
+  
+  // Create a new entry point node from the Start button dropdown
+  function handleAddEntryPointNode(nodeType: string, label: string) {
+    saveHistory();
+    
+    // Find a good position - below existing entry point nodes
+    const entryPointTypes = ['inboundNumber', 'extensionNumber', 'invokableDestination', 'sipTrunk', 'fromPolicy'];
+    const existingEntryPoints = nodesData.filter(n => entryPointTypes.includes(n.type));
+    
+    let newY = 150; // Default starting position
+    if (existingEntryPoints.length > 0) {
+      // Find the bottom-most entry point
+      const maxY = Math.max(...existingEntryPoints.map(n => {
+        const { height } = calculateNodeDimensions(n);
+        return n.position.y + height;
+      }));
+      newY = maxY + 30; // Add some spacing
+    }
+    
+    const newNode: FlowNodeData = {
+      id: `${nodeType}-${Date.now()}`,
+      type: nodeType,
+      position: { x: 50, y: newY },
+      data: {
+        label: label,
+        name: label,
+        outputs: [], // Entry point nodes start with no children
+      }
+    };
+    
+    nodes.update(currentNodes => [...currentNodes, newNode]);
   }
   
   // ===== Options Panel Callbacks =====
@@ -952,14 +1149,9 @@
   // console.log('[FlowEditor] Initialized with', nodesData.length, 'nodes and', edgesData.length, 'edges');
 </script>
 
-<svelte:window onkeydown={handleKeyDown} />
+<svelte:window onkeydown={handleKeyDown} onclick={handleDocumentClick} />
 
 <div class="flow-editor-container h-full w-full flex">
-  <!-- Node Palette (Left Sidebar) -->
-  {#if showNodePalette}
-    <NodePalette />
-  {/if}
-  
   <!-- Main Canvas Area -->
   <div class="flex-1 flex flex-col">
     <!-- Toolbar -->
@@ -1029,18 +1221,89 @@
         <Redo2 class="w-4 h-4" />
       </button>
       
+      <div class="toolbar-divider"></div>
+      
+      <!-- Start button dropdown -->
+      <div class="relative">
+        <button
+          class="start-dropdown-btn flex items-center gap-2 px-3 py-1.5 rounded"
+          onclick={() => showStartDropdown = !showStartDropdown}
+        >
+          <span class="text-sm font-medium">Click here to start</span>
+          <span class="chevron" class:open={showStartDropdown}>
+            <ChevronDown class="w-4 h-4" />
+          </span>
+        </button>
+        
+        {#if showStartDropdown}
+          <div class="start-dropdown-menu absolute top-full left-0 mt-1 py-1 rounded-lg shadow-xl z-50 min-w-[200px]">
+            {#if !existingEntryPointTypes().has('inboundNumber')}
+              <button
+                class="dropdown-item flex items-center gap-2 w-full px-3 py-2 text-left text-sm"
+                onclick={() => { handleAddEntryPointNode('inboundNumber', 'Inbound Numbers'); showStartDropdown = false; }}
+              >
+                <Phone class="w-4 h-4" />
+                <span>Add Inbound Numbers</span>
+              </button>
+            {/if}
+            {#if !existingEntryPointTypes().has('extensionNumber')}
+              <button
+                class="dropdown-item flex items-center gap-2 w-full px-3 py-2 text-left text-sm"
+                onclick={() => { handleAddEntryPointNode('extensionNumber', 'Extension'); showStartDropdown = false; }}
+              >
+                <PhoneIncoming class="w-4 h-4" />
+                <span>Add Extension</span>
+              </button>
+            {/if}
+            {#if !existingEntryPointTypes().has('invokableDestination')}
+              <button
+                class="dropdown-item flex items-center gap-2 w-full px-3 py-2 text-left text-sm"
+                onclick={() => { handleAddEntryPointNode('invokableDestination', 'Invokable Destination'); showStartDropdown = false; }}
+              >
+                <Globe class="w-4 h-4" />
+                <span>Add Invokable Destination</span>
+              </button>
+            {/if}
+            {#if !existingEntryPointTypes().has('sipTrunk')}
+              <button
+                class="dropdown-item flex items-center gap-2 w-full px-3 py-2 text-left text-sm"
+                onclick={() => { handleAddEntryPointNode('sipTrunk', 'SIP Trunk'); showStartDropdown = false; }}
+              >
+                <Server class="w-4 h-4" />
+                <span>From SIP Trunk</span>
+              </button>
+            {/if}
+            {#if !existingEntryPointTypes().has('fromPolicy')}
+              <button
+                class="dropdown-item flex items-center gap-2 w-full px-3 py-2 text-left text-sm"
+                onclick={() => { handleAddEntryPointNode('fromPolicy', 'From Policy'); showStartDropdown = false; }}
+              >
+                <Workflow class="w-4 h-4" />
+                <span>From Policy</span>
+              </button>
+            {/if}
+            {#if existingEntryPointTypes().size >= 5}
+              <div class="px-3 py-2 text-sm text-gray-500 italic">
+                All entry point types added
+              </div>
+            {/if}
+          </div>
+        {/if}
+      </div>
+      
       <div class="flex-1"></div>
       
-      <!-- Delete button -->
-      {#if selectedNodeIds.size > 0 || selectedEdgeIds.size > 0}
+      <!-- Delete policy button -->
+      {#if canDelete}
         <button 
-          class="p-2 hover:bg-red-500/20 text-red-400 rounded"
-          onclick={() => selectedNodeIds.size > 0 ? handleNodeDelete() : handleEdgeDelete()}
-          title="Delete selected (Delete)"
+          class="flex items-center gap-2 px-3 py-1.5 text-red-400 border border-red-400/50 hover:bg-red-500/20 rounded disabled:opacity-50"
+          onclick={() => onDelete?.()}
+          disabled={isDeleting}
+          title="Delete policy"
         >
           <Trash2 class="w-4 h-4" />
+          <span class="text-sm">{isDeleting ? 'Deleting...' : 'Delete'}</span>
         </button>
-        <div class="toolbar-divider"></div>
       {/if}
       
       <!-- Save button -->
@@ -1118,8 +1381,8 @@
           
           <!-- Render edges - use nodesHash to force re-render when nodes change -->
           {#each edgesData as edge (`${edge.id}-${nodesHash()}`)}
-            {@const sourcePos = getNodeHandlePosition(edge.source, 'source')}
-            {@const targetPos = getNodeHandlePosition(edge.target, 'target')}
+            {@const sourcePos = getNodeHandlePosition(edge.source, 'source', edge.sourceHandle, edge.target)}
+            {@const targetPos = getNodeHandlePosition(edge.target, 'target', edge.targetHandle, edge.source)}
             {#if sourcePos && targetPos}
               <FlowEdge 
                 {edge}
@@ -1127,38 +1390,54 @@
                 {targetPos}
                 selected={selectedEdgeIds.has(edge.id)}
                 onClick={(e) => handleEdgeClick(edge.id, e)}
+                onDelete={() => handleDeleteSingleEdge(edge.id)}
               />
             {/if}
           {/each}
           
           <!-- Edge creation preview -->
           {#if isCreatingEdge && edgeSourceNodeId && edgePreviewEnd}
-            {@const sourcePos = getNodeHandlePosition(edgeSourceNodeId, edgeSourceHandle || 'source')}
+            {@const sourcePos = getNodeHandlePosition(edgeSourceNodeId, 'source', edgeSourceHandle || undefined)}
             {#if sourcePos}
-              <line
-                x1={sourcePos.x}
-                y1={sourcePos.y}
-                x2={edgePreviewEnd.x}
-                y2={edgePreviewEnd.y}
+              {@const dx = edgePreviewEnd.x - sourcePos.x}
+              {@const dy = edgePreviewEnd.y - sourcePos.y}
+              {@const absDx = Math.abs(dx)}
+              {@const absDy = Math.abs(dy)}
+              {@const minHorizontalRun = Math.max(80, absDy * 0.5)}
+              {@const baseOffset = Math.max(minHorizontalRun, Math.min(absDx / 2, 200))}
+              {@const offset = dx < 0 ? Math.max(baseOffset, absDy * 0.6 + 80) : baseOffset}
+              {@const pathData = `M ${sourcePos.x} ${sourcePos.y} C ${sourcePos.x + offset} ${sourcePos.y}, ${edgePreviewEnd.x - offset} ${edgePreviewEnd.y}, ${edgePreviewEnd.x} ${edgePreviewEnd.y}`}
+              <path
+                d={pathData}
+                fill="none"
                 stroke="rgb(var(--color-primary-500))"
                 stroke-width="2"
-                stroke-dasharray="5,5"
+                stroke-dasharray="8,4"
+                stroke-linecap="round"
+              />
+              <!-- Preview endpoint indicator -->
+              <circle
+                cx={edgePreviewEnd.x}
+                cy={edgePreviewEnd.y}
+                r="6"
+                fill="rgb(var(--color-primary-500))"
+                fill-opacity="0.3"
+                stroke="rgb(var(--color-primary-500))"
+                stroke-width="2"
               />
             {/if}
           {/if}
         </svg>
-        
-        <!-- "Click here to START" button - always visible to add entry points -->
-        <StartButton 
-          onSelect={handleStartSelect}
-          position={{ x: 50, y: 100 }}
-        />
         
         <!-- Render nodes -->
         {#each nodesData as node (node.id)}
           <FlowNode 
             {node}
             selected={selectedNodeIds.has(node.id)}
+            connectedChildIds={connectedChildIds()}
+            footerConnected={footerConnectedNodeIds().has(node.id)}
+            inputConnected={inputConnectedNodeIds().has(node.id)}
+            isCreatingEdge={isCreatingEdge && edgeSourceNodeId !== node.id}
             onDoubleClick={() => handleNodeDoubleClick(node.id)}
             onChildDoubleClick={(childId, childData) => handleChildDoubleClick(node.id, childId, childData)}
             onAppDrop={handleAppDrop}
@@ -1221,7 +1500,7 @@
   }
   
   .flow-editor-canvas {
-    background-color: rgb(var(--color-surface-900));
+    background-color: rgb(var(--color-surface-700));
   }
   
   .toolbar-group {
@@ -1251,5 +1530,37 @@
   .info-panel {
     background-color: rgba(var(--color-surface-800), 0.9);
     color: rgb(var(--color-surface-200));
+  }
+  
+  /* Start dropdown button - styled like Save button */
+  .start-dropdown-btn {
+    background-color: rgb(37 99 235); /* bg-blue-600 */
+    color: white;
+  }
+  
+  .start-dropdown-btn:hover {
+    background-color: rgb(29 78 216); /* bg-blue-700 */
+  }
+  
+  .start-dropdown-btn .chevron {
+    transition: transform 0.2s ease;
+  }
+  
+  .start-dropdown-btn .chevron.open {
+    transform: rotate(180deg);
+  }
+  
+  .start-dropdown-menu {
+    background-color: rgb(var(--color-surface-800));
+    border: 1px solid rgb(var(--color-surface-600));
+  }
+  
+  .dropdown-item {
+    color: rgb(var(--color-surface-200));
+  }
+  
+  .dropdown-item:hover {
+    background-color: rgb(var(--color-surface-700));
+    color: white;
   }
 </style>

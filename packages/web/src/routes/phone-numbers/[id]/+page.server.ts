@@ -8,50 +8,49 @@ const NAMESPACE = env.SALESFORCE_PACKAGE_NAMESPACE || 'nbavs';
 interface SalesforcePhoneNumber {
   Id: string;
   Name: string;
-  nbavs__Id__c: number;
   nbavs__Number__c: string;
-  nbavs__DisplayNumber__c: string;
-  nbavs__Description__c: string;
+  nbavs__Country__c: string;
   nbavs__CountryCode__c: string;
-  nbavs__Type__c: string;
-  nbavs__Status__c: string;
-  nbavs__Policy__c: string;
-  nbavs__Policy__r?: {
-    Id: string;
-    Name: string;
-  };
+  nbavs__AreaCode__c: string;
+  nbavs__Area__c: string;
+  nbavs__LocalNumber__c: string;
+  nbavs__DDI_Number__c: boolean;
+  nbavs__Geographic__c: boolean;
+  nbavs__Capability_SMS__c: boolean;
+  nbavs__Capability_MMS__c: boolean;
+  nbavs__Capability_Voice__c: boolean;
+  nbavs__Local_Presence_Enabled__c: boolean;
+  LastModifiedDate: string;
+  nbavs__CallFlow__c: string;
+  nbavs__CallFlow__r?: { Id: string; Name: string };
   nbavs__User__c: string;
-  nbavs__User__r?: {
-    Id: string;
-    Name: string;
-  };
-  nbavs__Group__c: string;
-  nbavs__Group__r?: {
-    Id: string;
-    Name: string;
-  };
-  nbavs__CallerIdPresentation__c: string;
-  nbavs__EmergencyAddress__c: string;
+  nbavs__User__r?: { Id: string; Name: string };
 }
 
 export interface PhoneNumber {
   id: string;
-  sapienId: number;
   name: string;
   number: string;
-  displayNumber: string;
-  description: string;
+  formattedNumber: string;
+  country: string;
   countryCode: string;
-  type: string;
-  status: string;
-  policy?: { id: string; name: string };
-  user?: { id: string; name: string };
-  group?: { id: string; name: string };
-  callerIdPresentation: string;
-  emergencyAddress: string;
+  area: string;
+  areaCode: string;
+  localNumber: string;
+  isDDI: boolean;
+  isGeographic: boolean;
+  smsEnabled: boolean;
+  mmsEnabled: boolean;
+  voiceEnabled: boolean;
+  localPresenceEnabled: boolean;
+  lastModified: string;
+  userId?: string;
+  userName?: string;
+  callFlowId?: string;
+  callFlowName?: string;
 }
 
-interface Policy {
+interface CallFlow {
   id: string;
   name: string;
 }
@@ -61,32 +60,35 @@ interface UserOption {
   name: string;
 }
 
-interface GroupOption {
-  id: string;
-  name: string;
-}
-
 // Demo data
 const DEMO_PHONE_NUMBER: PhoneNumber = {
   id: 'pn001',
-  sapienId: 100,
   name: 'Main Office',
   number: '+442071234567',
-  displayNumber: '+44 20 7123 4567',
-  description: 'Main office reception number',
-  countryCode: 'GB',
-  type: 'DDI',
-  status: 'Active',
-  policy: { id: 'p001', name: 'Main IVR' },
-  callerIdPresentation: 'Number',
-  emergencyAddress: '123 Main Street, London, EC1A 1BB',
+  formattedNumber: '+44 20 7123 4567',
+  country: 'United Kingdom',
+  countryCode: '44',
+  area: 'London',
+  areaCode: '20',
+  localNumber: '71234567',
+  isDDI: true,
+  isGeographic: true,
+  smsEnabled: true,
+  mmsEnabled: false,
+  voiceEnabled: true,
+  localPresenceEnabled: false,
+  lastModified: '2026-01-05T10:30:00Z',
+  userName: 'John Smith',
+  userId: 'u001',
+  callFlowName: 'Main IVR',
+  callFlowId: 'cf001',
 };
 
-const DEMO_POLICIES: Policy[] = [
-  { id: 'p001', name: 'Main IVR' },
-  { id: 'p002', name: 'Sales Queue' },
-  { id: 'p003', name: 'Support Queue' },
-  { id: 'p004', name: 'After Hours' },
+const DEMO_CALL_FLOWS: CallFlow[] = [
+  { id: 'cf001', name: 'Main IVR' },
+  { id: 'cf002', name: 'Sales Queue' },
+  { id: 'cf003', name: 'Support Queue' },
+  { id: 'cf004', name: 'After Hours' },
 ];
 
 const DEMO_USERS: UserOption[] = [
@@ -95,11 +97,33 @@ const DEMO_USERS: UserOption[] = [
   { id: 'u003', name: 'Bob Johnson' },
 ];
 
-const DEMO_GROUPS: GroupOption[] = [
-  { id: 'g001', name: 'Sales Team' },
-  { id: 'g002', name: 'Support Team' },
-  { id: 'g003', name: 'UK Support' },
-];
+function formatPhoneNumber(number: string, countryCode?: string): string {
+  if (!number) return '';
+  const cleaned = number.replace(/\D/g, '');
+  
+  // UK formatting
+  if (countryCode === '44' || number.startsWith('+44')) {
+    const ukNumber = cleaned.startsWith('44') ? cleaned.slice(2) : cleaned;
+    if (ukNumber.length === 10) {
+      return `+44 ${ukNumber.slice(0, 2)} ${ukNumber.slice(2, 6)} ${ukNumber.slice(6)}`;
+    }
+    if (ukNumber.length === 11) {
+      if (ukNumber.startsWith('7')) {
+        return `+44 ${ukNumber.slice(0, 4)} ${ukNumber.slice(4, 7)} ${ukNumber.slice(7)}`;
+      }
+    }
+  }
+  
+  // US formatting
+  if (countryCode === '1' || number.startsWith('+1')) {
+    const usNumber = cleaned.startsWith('1') ? cleaned.slice(1) : cleaned;
+    if (usNumber.length === 10) {
+      return `+1 (${usNumber.slice(0, 3)}) ${usNumber.slice(3, 6)}-${usNumber.slice(6)}`;
+    }
+  }
+  
+  return number.startsWith('+') ? number : `+${number}`;
+}
 
 export const load: PageServerLoad = async ({ params, locals }) => {
   const { id } = params;
@@ -108,9 +132,8 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   if (env.PUBLIC_DEMO_MODE === 'true' || env.PUBLIC_DEMO_MODE === '1') {
     return {
       phoneNumber: { ...DEMO_PHONE_NUMBER, id },
-      policies: DEMO_POLICIES,
+      callFlows: DEMO_CALL_FLOWS,
       users: DEMO_USERS,
-      groups: DEMO_GROUPS,
       isDemo: true,
     };
   }
@@ -118,9 +141,8 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   if (!hasValidCredentials(locals)) {
     return {
       phoneNumber: null,
-      policies: [],
+      callFlows: [],
       users: [],
-      groups: [],
       isDemo: false,
       error: 'Not authenticated',
     };
@@ -129,14 +151,14 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   try {
     // Fetch phone number
     const phoneSoql = `
-      SELECT Id, Name, ${NAMESPACE}__Id__c,
-             ${NAMESPACE}__Number__c, ${NAMESPACE}__DisplayNumber__c,
-             ${NAMESPACE}__Description__c, ${NAMESPACE}__CountryCode__c,
-             ${NAMESPACE}__Type__c, ${NAMESPACE}__Status__c,
-             ${NAMESPACE}__Policy__c, ${NAMESPACE}__Policy__r.Id, ${NAMESPACE}__Policy__r.Name,
-             ${NAMESPACE}__User__c, ${NAMESPACE}__User__r.Id, ${NAMESPACE}__User__r.Name,
-             ${NAMESPACE}__Group__c, ${NAMESPACE}__Group__r.Id, ${NAMESPACE}__Group__r.Name,
-             ${NAMESPACE}__CallerIdPresentation__c, ${NAMESPACE}__EmergencyAddress__c
+      SELECT Id, Name,
+             ${NAMESPACE}__Number__c, ${NAMESPACE}__Country__c, ${NAMESPACE}__CountryCode__c,
+             ${NAMESPACE}__AreaCode__c, ${NAMESPACE}__Area__c, ${NAMESPACE}__LocalNumber__c,
+             ${NAMESPACE}__DDI_Number__c, ${NAMESPACE}__Geographic__c,
+             ${NAMESPACE}__Capability_SMS__c, ${NAMESPACE}__Capability_MMS__c, ${NAMESPACE}__Capability_Voice__c,
+             ${NAMESPACE}__Local_Presence_Enabled__c, LastModifiedDate,
+             ${NAMESPACE}__CallFlow__c, ${NAMESPACE}__CallFlow__r.Id, ${NAMESPACE}__CallFlow__r.Name,
+             ${NAMESPACE}__User__c, ${NAMESPACE}__User__r.Id, ${NAMESPACE}__User__r.Name
       FROM ${NAMESPACE}__PhoneNumber__c
       WHERE Id = '${id}'
       LIMIT 1
@@ -154,18 +176,18 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 
     const sfPhone = phoneResult.records[0];
 
-    // Fetch policies for dropdown
-    let policies: Policy[] = [];
+    // Fetch call flows for dropdown
+    let callFlows: CallFlow[] = [];
     try {
-      const policySoql = `SELECT Id, Name FROM ${NAMESPACE}__CallFlow__c ORDER BY Name LIMIT 200`;
-      const policyResult = await querySalesforce<{ Id: string; Name: string }>(
+      const cfSoql = `SELECT Id, Name FROM ${NAMESPACE}__CallFlow__c ORDER BY Name LIMIT 200`;
+      const cfResult = await querySalesforce<{ Id: string; Name: string }>(
         locals.instanceUrl!,
         locals.accessToken!,
-        policySoql
+        cfSoql
       );
-      policies = policyResult.records.map(p => ({ id: p.Id, name: p.Name }));
+      callFlows = cfResult.records.map(cf => ({ id: cf.Id, name: cf.Name }));
     } catch (e) {
-      console.warn('Failed to fetch policies:', e);
+      console.warn('Failed to fetch call flows:', e);
     }
 
     // Fetch users for dropdown
@@ -182,48 +204,35 @@ export const load: PageServerLoad = async ({ params, locals }) => {
       console.warn('Failed to fetch users:', e);
     }
 
-    // Fetch groups for dropdown
-    let groups: GroupOption[] = [];
-    try {
-      const groupSoql = `SELECT Id, Name FROM ${NAMESPACE}__Group__c ORDER BY Name LIMIT 200`;
-      const groupResult = await querySalesforce<{ Id: string; Name: string }>(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        groupSoql
-      );
-      groups = groupResult.records.map(g => ({ id: g.Id, name: g.Name }));
-    } catch (e) {
-      console.warn('Failed to fetch groups:', e);
-    }
+    const number = sfPhone.nbavs__Number__c || '';
 
     const phoneNumber: PhoneNumber = {
       id: sfPhone.Id,
-      sapienId: sfPhone.nbavs__Id__c || 0,
       name: sfPhone.Name || '',
-      number: sfPhone.nbavs__Number__c || '',
-      displayNumber: sfPhone.nbavs__DisplayNumber__c || sfPhone.nbavs__Number__c || '',
-      description: sfPhone.nbavs__Description__c || '',
+      number: number,
+      formattedNumber: formatPhoneNumber(number, sfPhone.nbavs__CountryCode__c),
+      country: sfPhone.nbavs__Country__c || '',
       countryCode: sfPhone.nbavs__CountryCode__c || '',
-      type: sfPhone.nbavs__Type__c || 'DDI',
-      status: sfPhone.nbavs__Status__c || 'Active',
-      policy: sfPhone.nbavs__Policy__r 
-        ? { id: sfPhone.nbavs__Policy__r.Id, name: sfPhone.nbavs__Policy__r.Name }
-        : undefined,
-      user: sfPhone.nbavs__User__r 
-        ? { id: sfPhone.nbavs__User__r.Id, name: sfPhone.nbavs__User__r.Name }
-        : undefined,
-      group: sfPhone.nbavs__Group__r 
-        ? { id: sfPhone.nbavs__Group__r.Id, name: sfPhone.nbavs__Group__r.Name }
-        : undefined,
-      callerIdPresentation: sfPhone.nbavs__CallerIdPresentation__c || 'Number',
-      emergencyAddress: sfPhone.nbavs__EmergencyAddress__c || '',
+      area: sfPhone.nbavs__Area__c || '',
+      areaCode: sfPhone.nbavs__AreaCode__c || '',
+      localNumber: sfPhone.nbavs__LocalNumber__c || '',
+      isDDI: sfPhone.nbavs__DDI_Number__c || false,
+      isGeographic: sfPhone.nbavs__Geographic__c || false,
+      smsEnabled: sfPhone.nbavs__Capability_SMS__c || false,
+      mmsEnabled: sfPhone.nbavs__Capability_MMS__c || false,
+      voiceEnabled: sfPhone.nbavs__Capability_Voice__c || false,
+      localPresenceEnabled: sfPhone.nbavs__Local_Presence_Enabled__c || false,
+      lastModified: sfPhone.LastModifiedDate,
+      userId: sfPhone.nbavs__User__r?.Id,
+      userName: sfPhone.nbavs__User__r?.Name,
+      callFlowId: sfPhone.nbavs__CallFlow__r?.Id,
+      callFlowName: sfPhone.nbavs__CallFlow__r?.Name,
     };
 
     return {
       phoneNumber,
-      policies,
+      callFlows,
       users,
-      groups,
       isDemo: false,
     };
   } catch (e) {
@@ -231,9 +240,8 @@ export const load: PageServerLoad = async ({ params, locals }) => {
     console.error('Failed to load phone number:', e);
     return {
       phoneNumber: null,
-      policies: [],
+      callFlows: [],
       users: [],
-      groups: [],
       isDemo: false,
       error: e instanceof Error ? e.message : 'Failed to load phone number',
     };
@@ -250,13 +258,9 @@ export const actions: Actions = {
 
     const formData = await request.formData();
     const name = formData.get('name') as string;
-    const description = formData.get('description') as string;
-    const displayNumber = formData.get('displayNumber') as string;
-    const policyId = formData.get('policyId') as string;
+    const callFlowId = formData.get('callFlowId') as string;
     const userId = formData.get('userId') as string;
-    const groupId = formData.get('groupId') as string;
-    const callerIdPresentation = formData.get('callerIdPresentation') as string;
-    const emergencyAddress = formData.get('emergencyAddress') as string;
+    const localPresenceEnabled = formData.get('localPresenceEnabled') === 'true';
 
     if (!name) {
       return fail(400, { error: 'Name is required' });
@@ -265,22 +269,12 @@ export const actions: Actions = {
     try {
       const updateData: Record<string, unknown> = {
         Name: name,
-        [`${NAMESPACE}__Description__c`]: description,
-        [`${NAMESPACE}__DisplayNumber__c`]: displayNumber,
-        [`${NAMESPACE}__CallerIdPresentation__c`]: callerIdPresentation,
-        [`${NAMESPACE}__EmergencyAddress__c`]: emergencyAddress,
+        [`${NAMESPACE}__Local_Presence_Enabled__c`]: localPresenceEnabled,
       };
 
-      // Only set lookup fields if they have values
-      if (policyId) {
-        updateData[`${NAMESPACE}__Policy__c`] = policyId;
-      }
-      if (userId) {
-        updateData[`${NAMESPACE}__User__c`] = userId;
-      }
-      if (groupId) {
-        updateData[`${NAMESPACE}__Group__c`] = groupId;
-      }
+      // Handle lookup fields - set to null if empty to clear them
+      updateData[`${NAMESPACE}__CallFlow__c`] = callFlowId || null;
+      updateData[`${NAMESPACE}__User__c`] = userId || null;
 
       await updateSalesforce(
         locals.instanceUrl!,
@@ -297,4 +291,3 @@ export const actions: Actions = {
     }
   },
 };
-

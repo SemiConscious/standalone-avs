@@ -67,17 +67,13 @@
   <!-- Page Header -->
   <div class="flex items-center justify-between">
     <div>
-      <h1 class="text-2xl font-bold">Call Reporting</h1>
+      <h1 class="text-2xl font-bold text-text-primary">Call Reporting</h1>
       <p class="text-text-secondary mt-1">Analytics and report generation for call data</p>
     </div>
     <div class="flex gap-2">
-      <Button variant="secondary" href="/call-reporting/scheduled">
-        <Calendar class="w-4 h-4 mr-2" />
-        Schedule Report
-      </Button>
       <Button variant="primary" href="/call-reporting/export">
         <Download class="w-4 h-4 mr-2" />
-        Export
+        Export Data
       </Button>
     </div>
   </div>
@@ -86,8 +82,8 @@
   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
     <Card>
       <div class="flex items-center gap-3">
-        <div class="p-3 bg-accent/10 rounded-base">
-          <Phone class="w-6 h-6 text-accent" />
+        <div class="p-3 bg-primary-500/10 rounded-base">
+          <Phone class="w-6 h-6 text-primary-400" />
         </div>
         <div>
           <p class="text-2xl font-bold">{data.stats.totalCalls.toLocaleString()}</p>
@@ -159,8 +155,8 @@
     </Card>
     <Card>
       <div class="flex items-center gap-3">
-        <div class="p-2 bg-accent/10 rounded-base">
-          <PhoneOutgoing class="w-5 h-5 text-accent" />
+        <div class="p-2 bg-primary-500/10 rounded-base">
+          <PhoneOutgoing class="w-5 h-5 text-primary-400" />
         </div>
         <div class="flex-1">
           <div class="flex items-center justify-between">
@@ -169,7 +165,7 @@
           </div>
           <div class="mt-1 h-2 bg-bg-tertiary rounded-full overflow-hidden">
             <div
-              class="h-full bg-accent rounded-full"
+              class="h-full bg-primary-500 rounded-full"
               style="width: {data.stats.totalCalls > 0 ? (data.stats.outboundCalls / data.stats.totalCalls) * 100 : 0}%"
             ></div>
           </div>
@@ -199,18 +195,32 @@
 
   <!-- Report Types -->
   <Card>
-    <h2 class="text-lg font-semibold mb-4">Available Reports</h2>
+    <h2 class="text-lg font-semibold text-text-primary mb-4">Available Reports</h2>
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       {#each data.reportTypes as report}
         {@const ReportIcon = getReportIcon(report.icon)}
-        <a
-          href="/call-reporting/{report.id}"
-          class="p-4 border border-border rounded-base hover:border-accent transition-colors text-left block"
-        >
-          <ReportIcon class="w-6 h-6 text-accent mb-2" />
-          <h3 class="font-medium">{report.name}</h3>
-          <p class="text-sm text-text-secondary">{report.description}</p>
-        </a>
+        {@const href = report.id === 'custom' ? '/call-reporting/export' : `/call-reporting/${report.id}`}
+        {@const isDisabled = report.id === 'scheduled'}
+        {#if isDisabled}
+          <div
+            class="p-4 border border-border rounded-base bg-bg-secondary/50 text-left opacity-60"
+            title="Coming soon"
+          >
+            <ReportIcon class="w-6 h-6 text-text-secondary mb-2" />
+            <h3 class="font-medium text-text-primary">{report.name}</h3>
+            <p class="text-sm text-text-secondary">{report.description}</p>
+            <p class="text-xs text-text-secondary mt-2 italic">Coming soon</p>
+          </div>
+        {:else}
+          <a
+            {href}
+            class="p-4 border border-border rounded-base hover:border-primary-500/50 transition-colors text-left block"
+          >
+            <ReportIcon class="w-6 h-6 text-primary-400 mb-2" />
+            <h3 class="font-medium text-text-primary">{report.name}</h3>
+            <p class="text-sm text-text-secondary">{report.description}</p>
+          </a>
+        {/if}
       {/each}
     </div>
   </Card>

@@ -1,6 +1,6 @@
 import type { PageServerLoad, Actions } from './$types';
 import { hasValidCredentials } from '$lib/server/salesforce';
-import { getSapienJwt, getSapienConfig } from '$lib/server/sapien';
+import { getSapienAccessToken, getSapienHost, getOrganizationId } from '$lib/server/gatekeeper';
 import {
   getSoundFiles,
   getVoices,
@@ -131,23 +131,24 @@ export const load: PageServerLoad = async ({ locals }) => {
   }
 
   try {
-    const sapienConfig = getSapienConfig();
-    const jwt = await getSapienJwt();
+    // Get Sapien access token and settings
+    const sapienToken = await getSapienAccessToken(locals.instanceUrl!, locals.accessToken!);
+    const sapienHost = getSapienHost();
+    const orgId = getOrganizationId();
 
-    const ttsHost = env.TTS_HOST || sapienConfig?.host;
+    const ttsHost = env.TTS_HOST || sapienHost;
     if (!ttsHost) {
       throw new Error('TTS API host not configured');
     }
 
-    const orgId = sapienConfig?.organizationId;
     if (!orgId) {
       throw new Error('Organization ID not configured');
     }
 
-    // Fetch sounds and voices in parallel
+    // Fetch sounds and voices in parallel using Sapien access token
     const [sounds, voices] = await Promise.all([
-      getSoundFiles(ttsHost, jwt, orgId).catch(() => []),
-      getVoices(ttsHost, jwt, orgId).catch(() => DEMO_VOICES), // Fallback to demo voices
+      getSoundFiles(ttsHost, sapienToken, orgId).catch(() => []),
+      getVoices(ttsHost, sapienToken, orgId).catch(() => DEMO_VOICES), // Fallback to demo voices
     ]);
 
     return {
@@ -183,20 +184,21 @@ export const actions: Actions = {
     }
 
     try {
-      const sapienConfig = getSapienConfig();
-      const jwt = await getSapienJwt();
+      // Get Sapien access token and settings
+      const sapienToken = await getSapienAccessToken(locals.instanceUrl!, locals.accessToken!);
+      const sapienHost = getSapienHost();
+      const orgId = getOrganizationId();
 
-      const ttsHost = env.TTS_HOST || sapienConfig?.host;
+      const ttsHost = env.TTS_HOST || sapienHost;
       if (!ttsHost) {
         throw new Error('TTS API host not configured');
       }
 
-      const orgId = sapienConfig?.organizationId;
       if (!orgId) {
         throw new Error('Organization ID not configured');
       }
 
-      await createTTSSound(ttsHost, jwt, orgId, name, text, voiceId, description || undefined);
+      await createTTSSound(ttsHost, sapienToken, orgId, name, text, voiceId, description || undefined);
 
       return { success: true };
     } catch (e) {
@@ -218,20 +220,21 @@ export const actions: Actions = {
     }
 
     try {
-      const sapienConfig = getSapienConfig();
-      const jwt = await getSapienJwt();
+      // Get Sapien access token and settings
+      const sapienToken = await getSapienAccessToken(locals.instanceUrl!, locals.accessToken!);
+      const sapienHost = getSapienHost();
+      const orgId = getOrganizationId();
 
-      const ttsHost = env.TTS_HOST || sapienConfig?.host;
+      const ttsHost = env.TTS_HOST || sapienHost;
       if (!ttsHost) {
         throw new Error('TTS API host not configured');
       }
 
-      const orgId = sapienConfig?.organizationId;
       if (!orgId) {
         throw new Error('Organization ID not configured');
       }
 
-      await deleteSoundFile(ttsHost, jwt, orgId, soundId);
+      await deleteSoundFile(ttsHost, sapienToken, orgId, soundId);
 
       return { success: true };
     } catch (e) {

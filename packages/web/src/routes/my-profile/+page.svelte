@@ -109,6 +109,16 @@
               <div>{profileData.user.extension || '—'}</div>
 
               <div>
+                <span class="text-accent font-medium">Home Country</span>
+              </div>
+              <div>{profileData.user.homeCountry || '—'}</div>
+
+              <div>
+                <span class="text-accent font-medium">Default Voice</span>
+              </div>
+              <div>{profileData.user.defaultVoice || '—'}</div>
+
+              <div>
                 <span class="text-accent font-medium">My DDI(s)</span>
               </div>
               <div>{profileData.ddis.join(' ') || '—'}</div>
@@ -133,10 +143,10 @@
             <p class="text-sm text-text-secondary mb-3">My active inbound numbers</p>
             {#if profileData.activeInboundNumbers.length > 0}
               <div class="space-y-1">
-                {#each profileData.activeInboundNumbers as number, i}
+                {#each profileData.activeInboundNumbers as item}
                   <div class="flex items-center gap-2 text-sm">
-                    <input type="checkbox" checked disabled class="rounded border-border" />
-                    <span class="text-accent">{number}</span>
+                    <input type="checkbox" checked={item.enabled} disabled class="rounded border-border" />
+                    <span class="text-accent">{item.number}</span>
                   </div>
                 {/each}
               </div>

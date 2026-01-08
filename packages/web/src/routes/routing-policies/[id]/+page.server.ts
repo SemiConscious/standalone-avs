@@ -1,6 +1,5 @@
 import type { PageServerLoad } from './$types';
 import { hasValidCredentials, querySalesforce } from '$lib/server/salesforce';
-import { getSapienJwt, canGetSapienJwt } from '$lib/server/sapien';
 import { env } from '$env/dynamic/private';
 import { error } from '@sveltejs/kit';
 

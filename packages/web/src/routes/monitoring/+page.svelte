@@ -1,7 +1,6 @@
 <script lang="ts">
   import { Card, Badge } from '$lib/components/ui';
   import {
-    Monitor,
     Activity,
     Server,
     AlertTriangle,
@@ -53,7 +52,7 @@
       case 'error':
         return 'text-error';
       default:
-        return 'text-accent';
+        return 'text-primary-400';
     }
   }
 
@@ -102,7 +101,7 @@
   <!-- Page Header -->
   <div class="flex items-center justify-between">
     <div>
-      <h1 class="text-2xl font-bold">Natterbox Monitoring</h1>
+      <h1 class="text-2xl font-bold text-text-primary">Natterbox Monitoring</h1>
       <p class="text-text-secondary mt-1">System health and service status monitoring</p>
     </div>
     <button
@@ -175,7 +174,7 @@
 
   <!-- Service Status -->
   <Card>
-    <h2 class="text-lg font-semibold mb-4">Service Status</h2>
+    <h2 class="text-lg font-semibold mb-4 text-text-primary">Service Status</h2>
     {#if data.services.length > 0}
       <div class="space-y-3">
         {#each data.services as service}
@@ -203,7 +202,7 @@
 
   <!-- Recent Events -->
   <Card>
-    <h2 class="text-lg font-semibold mb-4">Recent Events</h2>
+    <h2 class="text-lg font-semibold mb-4 text-text-primary">Recent Events</h2>
     {#if data.recentEvents.length > 0}
       <div class="space-y-2">
         {#each data.recentEvents as event}

@@ -1,6 +1,12 @@
 import type { PageServerLoad, Actions } from './$types';
 import { hasValidCredentials, querySalesforce, updateSalesforce } from '$lib/server/salesforce';
-import { getSapienJwt, sapienRequest, getSapienConfig } from '$lib/server/sapien';
+import { sapienRequest } from '$lib/server/sapien';
+import { 
+  canUseSapienApi, 
+  getSapienAccessToken, 
+  getSapienHost, 
+  getOrganizationId 
+} from '$lib/server/gatekeeper';
 import { getOrganizationLicenses, validateUserLicenses, type OrganizationLicenses } from '$lib/server/license';
 import { env } from '$env/dynamic/private';
 import { error, fail } from '@sveltejs/kit';
@@ -120,6 +126,8 @@ export const load: PageServerLoad = async ({ params, locals }) => {
       ],
       organizationLicenses: DEMO_ORG_LICENSES,
       isDemo: true,
+      availabilityProfileId: 'ap2', // Demo: user has Support Level 2 profile
+      linkedUserId: 'sf1', // Demo: linked to John Smith
     };
   }
 
@@ -131,6 +139,8 @@ export const load: PageServerLoad = async ({ params, locals }) => {
       organizationLicenses: null,
       isDemo: false,
       error: 'Not authenticated',
+      availabilityProfileId: '',
+      linkedUserId: '',
     };
   }
 
@@ -275,6 +285,9 @@ export const load: PageServerLoad = async ({ params, locals }) => {
       salesforceUsers,
       organizationLicenses,
       isDemo: false,
+      // Include IDs for form initialization
+      availabilityProfileId: sfUser.nbavs__AvailabilityProfile__c || '',
+      linkedUserId: sfUser.nbavs__User__c || '',
     };
   } catch (e) {
     if ((e as { status?: number }).status === 404) throw e;
@@ -286,6 +299,8 @@ export const load: PageServerLoad = async ({ params, locals }) => {
       organizationLicenses: null,
       isDemo: false,
       error: e instanceof Error ? e.message : 'Failed to load user',
+      availabilityProfileId: '',
+      linkedUserId: '',
     };
   }
 };
@@ -487,33 +502,36 @@ export const actions: Actions = {
 
       // Also update Sapien if we have the sapien ID
       try {
-        const sapienConfig = getSapienConfig();
-        const jwt = await getSapienJwt();
+        if (canUseSapienApi(locals)) {
+          const sapienToken = await getSapienAccessToken(locals.instanceUrl!, locals.accessToken!);
+          const sapienHost = getSapienHost();
+          const organizationId = getOrganizationId();
 
-        if (sapienConfig?.host && sapienConfig?.organizationId) {
-          // Get the Sapien ID from the record
-          const userSoql = `SELECT ${NAMESPACE}__Id__c FROM ${NAMESPACE}__User__c WHERE Id = '${id}'`;
-          const userResult = await querySalesforce<{ nbavs__Id__c: number }>(
-            locals.instanceUrl!,
-            locals.accessToken!,
-            userSoql
-          );
-
-          if (userResult.records[0]?.nbavs__Id__c) {
-            const sapienId = userResult.records[0].nbavs__Id__c;
-            await sapienRequest(
-              sapienConfig.host,
-              jwt,
-              'PATCH',
-              `/v1/users/${sapienConfig.organizationId}/${sapienId}`,
-              {
-                firstName,
-                lastName,
-                sipExtension: extension,
-                mobilePhone,
-                enabled,
-              }
+          if (sapienHost && organizationId) {
+            // Get the Sapien ID from the record
+            const userSoql = `SELECT ${NAMESPACE}__Id__c FROM ${NAMESPACE}__User__c WHERE Id = '${id}'`;
+            const userResult = await querySalesforce<{ nbavs__Id__c: number }>(
+              locals.instanceUrl!,
+              locals.accessToken!,
+              userSoql
             );
+
+            if (userResult.records[0]?.nbavs__Id__c) {
+              const sapienId = userResult.records[0].nbavs__Id__c;
+              await sapienRequest(
+                sapienHost,
+                sapienToken,
+                'PATCH',
+                `/v1/users/${organizationId}/${sapienId}`,
+                {
+                  firstName,
+                  lastName,
+                  sipExtension: extension,
+                  mobilePhone,
+                  enabled,
+                }
+              );
+            }
           }
         }
       } catch (sapienError) {

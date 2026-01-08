@@ -84,9 +84,9 @@
   <!-- Header -->
   <div class="flex items-center justify-between">
     <div class="flex items-center gap-3">
-      <Activity class="w-8 h-8 text-accent animate-pulse" />
+      <Activity class="w-8 h-8 text-primary-400 animate-pulse" />
       <div>
-        <h1 class="text-2xl font-bold">Live Wallboard</h1>
+        <h1 class="text-2xl font-bold text-text-primary">Live Wallboard</h1>
         <p class="text-sm text-text-secondary">
           {#if lastUpdated}
             Last updated: {lastUpdated.toLocaleTimeString()}
@@ -146,10 +146,10 @@
       </Card>
 
       <!-- Agents Available -->
-      <Card class="bg-gradient-to-br from-accent/10 to-accent/5 border-accent/20">
+      <Card class="bg-gradient-to-br from-primary-500/10 to-primary-500/5 border-primary-500/20">
         <div class="text-center">
-          <Users class="w-8 h-8 mx-auto mb-2 text-accent" />
-          <p class="text-4xl font-bold text-accent">{stats.agentsAvailable}</p>
+          <Users class="w-8 h-8 mx-auto mb-2 text-primary-400" />
+          <p class="text-4xl font-bold text-primary-400">{stats.agentsAvailable}</p>
           <p class="text-sm text-text-secondary">Available</p>
         </div>
       </Card>
@@ -186,8 +186,8 @@
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
       <!-- Calls by Direction -->
       <Card>
-        <h3 class="font-semibold mb-4 flex items-center gap-2">
-          <Activity class="w-5 h-5 text-accent" />
+        <h3 class="font-semibold mb-4 flex items-center gap-2 text-text-primary">
+          <Activity class="w-5 h-5 text-primary-400" />
           Calls by Direction
         </h3>
         <div class="space-y-3">
@@ -200,7 +200,7 @@
           </div>
           <div class="flex items-center justify-between p-3 bg-bg-secondary rounded-base">
             <div class="flex items-center gap-2">
-              <PhoneOutgoing class="w-5 h-5 text-accent" />
+              <PhoneOutgoing class="w-5 h-5 text-primary-400" />
               <span>Outbound</span>
             </div>
             <span class="text-2xl font-bold">{stats.callsByDirection.outbound}</span>
@@ -217,8 +217,8 @@
 
       <!-- Queues -->
       <Card>
-        <h3 class="font-semibold mb-4 flex items-center gap-2">
-          <Users class="w-5 h-5 text-accent" />
+        <h3 class="font-semibold mb-4 flex items-center gap-2 text-text-primary">
+          <Users class="w-5 h-5 text-primary-400" />
           Calls by Queue
         </h3>
         {#if stats.callsByQueue.length > 0}
@@ -239,8 +239,8 @@
 
       <!-- Agent Summary -->
       <Card>
-        <h3 class="font-semibold mb-4 flex items-center gap-2">
-          <Users class="w-5 h-5 text-accent" />
+        <h3 class="font-semibold mb-4 flex items-center gap-2 text-text-primary">
+          <Users class="w-5 h-5 text-primary-400" />
           Agent Summary
         </h3>
         <div class="space-y-3">
@@ -295,16 +295,16 @@
       <Card>
         <div class="flex items-center justify-between">
           <div>
-            <h3 class="font-semibold">Total Calls Today</h3>
+            <h3 class="font-semibold text-text-primary">Total Calls Today</h3>
             <p class="text-sm text-text-secondary">Since midnight</p>
           </div>
-          <p class="text-4xl font-bold text-accent">{stats.totalCallsToday}</p>
+          <p class="text-4xl font-bold text-primary-400">{stats.totalCallsToday}</p>
         </div>
       </Card>
       <Card>
         <div class="flex items-center justify-between">
           <div>
-            <h3 class="font-semibold">Connection Status</h3>
+            <h3 class="font-semibold text-text-primary">Connection Status</h3>
             <p class="text-sm text-text-secondary">Real-time data feed</p>
           </div>
           <div class="flex items-center gap-2">
@@ -316,7 +316,7 @@
     </div>
   {:else if loading}
     <div class="text-center py-20">
-      <RefreshCw class="w-12 h-12 mx-auto mb-4 animate-spin text-accent" />
+      <RefreshCw class="w-12 h-12 mx-auto mb-4 animate-spin text-primary-400" />
       <p class="text-text-secondary">Loading wallboard data...</p>
     </div>
   {/if}

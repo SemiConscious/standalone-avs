@@ -1,6 +1,8 @@
 import { querySalesforce, hasValidCredentials } from '$lib/server/salesforce';
+import { getLicenseFromSapien, isCallReportingRunning, fetchApiSettings, clearAllCaches, getSalesforceOrgId } from '$lib/server/gatekeeper';
 import { env } from '$env/dynamic/private';
-import type { PageServerLoad } from './$types';
+import type { PageServerLoad, Actions } from './$types';
+import { fail } from '@sveltejs/kit';
 
 interface ScheduledJob {
   id: string;
@@ -36,6 +38,7 @@ export interface AdminData {
   scheduledJobs: ScheduledJob[];
   jobsRunning: number;
   organizationId: string;
+  instanceUrl: string;
   isDemo: boolean;
   error?: string;
 }
@@ -91,6 +94,7 @@ const DEMO_DATA: AdminData = {
   ],
   jobsRunning: 7,
   organizationId: '00D0000000bKE9MA2',
+  instanceUrl: 'https://demo.salesforce.com',
   isDemo: true,
 };
 
@@ -127,87 +131,45 @@ export const load: PageServerLoad = async ({ locals }) => {
       querySalesforce<{ expr0: number }>(locals.instanceUrl!, locals.accessToken!, 'SELECT COUNT() FROM nbavs__RecordingAccess__c').catch(() => ({ totalSize: 0 })),
     ]);
 
-    // Fetch license/subscription settings
+    // Fetch license/subscription settings from Sapien API
+    // (License_v1__c is a protected custom setting that can't be queried via SOQL API)
     let subscriptions: Subscription[] = [];
     let subscriptionsUpdated = '';
     
     try {
-      const licenseResult = await querySalesforce<{
-        nbavs__Voice__c: boolean;
-        nbavs__Voice_Count__c: number;
-        nbavs__ContactCentre__c: boolean;
-        nbavs__ContactCentre_Count__c: number;
-        nbavs__Record__c: boolean;
-        nbavs__Record_Count__c: number;
-        nbavs__CTI__c: boolean;
-        nbavs__CTI_Count__c: number;
-        nbavs__PCI__c: boolean;
-        nbavs__PCI_Count__c: number;
-        nbavs__Insights__c: boolean;
-        nbavs__Insights_Count__c: number;
-        nbavs__Freedom__c: boolean;
-        nbavs__Freedom_Count__c: number;
-        nbavs__ServiceCloudVoice__c: boolean;
-        nbavs__ServiceCloudVoice_Count__c: number;
-        nbavs__SMS__c: boolean;
-        nbavs__SMS_Count__c: number;
-        nbavs__WhatsApp__c: boolean;
-        nbavs__WhatsApp_Count__c: number;
-        nbavs__AIAdvisor__c: boolean;
-        nbavs__AIAdvisor_Count__c: number;
-        nbavs__AIAgents__c: number;
-        nbavs__AIAssistants__c: number;
-        nbavs__AIAgentsCallAllowance__c: number;
-        nbavs__AIAssistantsCallAllowance__c: number;
-        nbavs__AIAgentsDigitalMessageAllowance__c: number;
-        nbavs__AIAssistantsDigitalMessageAllowance__c: number;
-        LastModifiedDate: string;
-      }>(locals.instanceUrl!, locals.accessToken!, `
-        SELECT 
-          nbavs__Voice__c, nbavs__Voice_Count__c,
-          nbavs__ContactCentre__c, nbavs__ContactCentre_Count__c,
-          nbavs__Record__c, nbavs__Record_Count__c,
-          nbavs__CTI__c, nbavs__CTI_Count__c,
-          nbavs__PCI__c, nbavs__PCI_Count__c,
-          nbavs__Insights__c, nbavs__Insights_Count__c,
-          nbavs__Freedom__c, nbavs__Freedom_Count__c,
-          nbavs__ServiceCloudVoice__c, nbavs__ServiceCloudVoice_Count__c,
-          nbavs__SMS__c, nbavs__SMS_Count__c,
-          nbavs__WhatsApp__c, nbavs__WhatsApp_Count__c,
-          nbavs__AIAdvisor__c, nbavs__AIAdvisor_Count__c,
-          nbavs__AIAgents__c, nbavs__AIAssistants__c,
-          nbavs__AIAgentsCallAllowance__c, nbavs__AIAssistantsCallAllowance__c,
-          nbavs__AIAgentsDigitalMessageAllowance__c, nbavs__AIAssistantsDigitalMessageAllowance__c,
-          LastModifiedDate
-        FROM nbavs__License_v1__c LIMIT 1
-      `);
+      // First ensure API settings are loaded (this is needed for isCallReportingRunning)
+      await fetchApiSettings(locals.instanceUrl!, locals.accessToken!);
       
-      if (licenseResult.records.length > 0) {
-        const l = licenseResult.records[0];
-        subscriptionsUpdated = l.LastModifiedDate ? new Date(l.LastModifiedDate).toLocaleString() : '';
+      const license = await getLicenseFromSapien(locals.instanceUrl!, locals.accessToken!);
+      
+      if (license) {
+        subscriptionsUpdated = new Date().toLocaleString();
         
         subscriptions = [
-          { name: 'Voice', enabled: l.nbavs__Voice__c || false, count: l.nbavs__Voice_Count__c || 0, icon: 'phone', color: 'blue' },
-          { name: 'Contact Centre', enabled: l.nbavs__ContactCentre__c || false, count: l.nbavs__ContactCentre_Count__c || 0, icon: 'headset', color: 'green' },
-          { name: 'Record', enabled: l.nbavs__Record__c || false, count: l.nbavs__Record_Count__c || 0, icon: 'mic', color: 'red' },
-          { name: 'CTI', enabled: l.nbavs__CTI__c || false, count: l.nbavs__CTI_Count__c || 0, icon: 'monitor', color: 'purple' },
-          { name: 'PCI', enabled: l.nbavs__PCI__c || false, count: l.nbavs__PCI_Count__c || 0, icon: 'shield', color: 'orange' },
-          { name: 'Legacy Insight', enabled: l.nbavs__Insights__c || false, count: l.nbavs__Insights_Count__c || 0, icon: 'chart', color: 'cyan' },
-          { name: 'Freedom', enabled: l.nbavs__Freedom__c || false, count: l.nbavs__Freedom_Count__c || 0, icon: 'globe', color: 'indigo' },
-          { name: 'Service Cloud Voice', enabled: l.nbavs__ServiceCloudVoice__c || false, count: l.nbavs__ServiceCloudVoice_Count__c || 0, icon: 'cloud', color: 'sky' },
-          { name: 'SMS', enabled: l.nbavs__SMS__c || false, count: l.nbavs__SMS_Count__c || 0, icon: 'message', color: 'emerald' },
-          { name: 'WhatsApp', enabled: l.nbavs__WhatsApp__c || false, count: l.nbavs__WhatsApp_Count__c || 0, icon: 'whatsapp', color: 'green' },
-          { name: 'AI Advisor', enabled: l.nbavs__AIAdvisor__c || false, count: l.nbavs__AIAdvisor_Count__c || 0, icon: 'sparkles', color: 'violet' },
-          { name: 'AI Agents', enabled: (l.nbavs__AIAgents__c || 0) > 0, count: l.nbavs__AIAgents__c || 0, icon: 'bot', color: 'fuchsia' },
-          { name: 'AI Assistants', enabled: (l.nbavs__AIAssistants__c || 0) > 0, count: l.nbavs__AIAssistants__c || 0, icon: 'brain', color: 'rose' },
-          { name: 'AI Agents Call Allowance', enabled: (l.nbavs__AIAgentsCallAllowance__c || 0) > 0, count: l.nbavs__AIAgentsCallAllowance__c || 0, icon: 'phone-call', color: 'amber' },
-          { name: 'AI Assistants Call Allowance', enabled: (l.nbavs__AIAssistantsCallAllowance__c || 0) > 0, count: l.nbavs__AIAssistantsCallAllowance__c || 0, icon: 'phone-incoming', color: 'lime' },
-          { name: 'AI Agents Digital Message Allowance', enabled: (l.nbavs__AIAgentsDigitalMessageAllowance__c || 0) > 0, count: l.nbavs__AIAgentsDigitalMessageAllowance__c || 0, icon: 'messages', color: 'teal' },
-          { name: 'AI Assistants Digital Message Allowance', enabled: (l.nbavs__AIAssistantsDigitalMessageAllowance__c || 0) > 0, count: l.nbavs__AIAssistantsDigitalMessageAllowance__c || 0, icon: 'message-circle', color: 'pink' },
+          { name: 'Voice', enabled: license.Voice__c || false, count: license.Voice_Count__c || 0, icon: 'phone', color: 'blue' },
+          { name: 'Contact Centre', enabled: license.ContactCentre__c || false, count: license.ContactCentre_Count__c || 0, icon: 'headset', color: 'green' },
+          { name: 'Record', enabled: license.Record__c || false, count: license.Record_Count__c || 0, icon: 'mic', color: 'red' },
+          { name: 'CTI', enabled: license.CTI__c || false, count: license.CTI_Count__c || 0, icon: 'monitor', color: 'purple' },
+          { name: 'PCI', enabled: license.PCI__c || false, count: license.PCI_Count__c || 0, icon: 'shield', color: 'orange' },
+          { name: 'Legacy Insight', enabled: license.Insights__c || false, count: license.Insights_Count__c || 0, icon: 'chart', color: 'cyan' },
+          { name: 'Freedom', enabled: license.Freedom__c || false, count: license.Freedom_Count__c || 0, icon: 'globe', color: 'indigo' },
+          { name: 'Service Cloud Voice', enabled: license.ServiceCloudVoice__c || false, count: license.ServiceCloudVoice_Count__c || 0, icon: 'cloud', color: 'sky' },
+          { name: 'SMS', enabled: license.SMS__c || false, count: license.SMS_Count__c || 0, icon: 'message', color: 'emerald' },
+          { name: 'WhatsApp', enabled: license.WhatsApp__c || false, count: license.WhatsApp_Count__c || 0, icon: 'whatsapp', color: 'green' },
+          { name: 'AI Advisor', enabled: license.AIAdvisor__c || false, count: license.AIAdvisor_Count__c || 0, icon: 'sparkles', color: 'violet' },
+          { name: 'AI Agents', enabled: (license.AIAgents__c || 0) > 0, count: license.AIAgents__c || 0, icon: 'bot', color: 'fuchsia' },
+          { name: 'AI Assistants', enabled: (license.AIAssistants__c || 0) > 0, count: license.AIAssistants__c || 0, icon: 'brain', color: 'rose' },
+          { name: 'AI Agents Call Allowance', enabled: (license.AIAgentsCallAllowance__c || 0) > 0, count: license.AIAgentsCallAllowance__c || 0, icon: 'phone-call', color: 'amber' },
+          { name: 'AI Assistants Call Allowance', enabled: (license.AIAssistantsCallAllowance__c || 0) > 0, count: license.AIAssistantsCallAllowance__c || 0, icon: 'phone-incoming', color: 'lime' },
+          { name: 'AI Agents Digital Message Allowance', enabled: (license.AIAgentsDigitalMessageAllowance__c || 0) > 0, count: license.AIAgentsDigitalMessageAllowance__c || 0, icon: 'messages', color: 'teal' },
+          { name: 'AI Assistants Digital Message Allowance', enabled: (license.AIAssistantsDigitalMessageAllowance__c || 0) > 0, count: license.AIAssistantsDigitalMessageAllowance__c || 0, icon: 'message-circle', color: 'pink' },
         ];
+      } else {
+        console.log('[Admin] License not available from Sapien, using demo data');
+        subscriptions = DEMO_DATA.subscriptions;
       }
     } catch (e) {
-      console.error('Failed to fetch license:', e);
+      console.error('Failed to fetch license from Sapien:', e);
       subscriptions = DEMO_DATA.subscriptions;
     }
 
@@ -242,12 +204,16 @@ export const load: PageServerLoad = async ({ locals }) => {
 
       const runningJobNames = new Set(cronResult.records.map(r => r.CronJobDetail?.Name));
       
+      // CRO (Call Reporting) uses a different mechanism - it checks API_v1__c.ReportingPolicyId__c
+      // instead of CronTrigger. If ReportingPolicyId__c is set, CRO is running.
+      const croRunning = isCallReportingRunning();
+      
       scheduledJobs = [
-        { id: 'cro', name: 'Call Reporting Scheduled Job', isRunning: runningJobNames.has('Call Reporting'), canStart: true, canStop: true },
+        { id: 'cro', name: 'Call Reporting Scheduled Job', isRunning: croRunning, canStart: true, canStop: true },
         { id: 'hcro', name: 'HCRO Processing Scheduled Job', isRunning: runningJobNames.has('HCRO Processing'), canStart: true, canStop: true },
         { id: 'availability', name: 'Availability Logs Scheduled Job', isRunning: runningJobNames.has('Availability Logs'), canStart: true, canStop: true },
         { id: 'cq', name: 'Call Queue Logs Scheduled Job', isRunning: runningJobNames.has('Call Queue Logs'), canStart: true, canStop: true },
-        { id: 'userServicePresGroupSync', name: 'Omni-Channel Status and Group Login Synchroniser Scheduled Job', isRunning: runningJobNames.has('Omni-Channel Status and Group Login Synchroniser'), canStart: true, canStop: true },
+        { id: 'userServicePresGroupSync', name: 'Omni-Channel Status and Group Login Synchroniser Scheduled Job', isRunning: runningJobNames.has('User Service Presence Group Sync'), canStart: true, canStop: true },
         { id: 'crFixer', name: 'Wrap-Up Fixer Scheduled Job', isRunning: runningJobNames.has('Wrap-Up Fixer'), canStart: true, canStop: true },
         { id: 'ddlProcessor', name: 'Dynamic Dial List Processor Scheduled Job', isRunning: runningJobNames.has('Dynamic Dial List Processor'), canStart: true, canStop: true },
         { id: 'insights', name: 'AI Advisor Scheduled Job', isRunning: runningJobNames.has('AI Advisor'), canStart: true, canStop: true },
@@ -263,8 +229,15 @@ export const load: PageServerLoad = async ({ locals }) => {
       console.error('Failed to fetch cron jobs:', e);
     }
 
-    // Get organization ID from the instance URL
-    const orgId = locals.instanceUrl?.match(/https:\/\/([^.]+)/)?.[1] || '';
+    // Get the actual Salesforce Organization ID (15-char ID like 00D0000000xxxxx)
+    let orgId = '';
+    try {
+      orgId = await getSalesforceOrgId(locals.instanceUrl!, locals.accessToken!);
+    } catch (e) {
+      console.error('Failed to fetch Salesforce Org ID:', e);
+      // Fallback to subdomain from instance URL
+      orgId = locals.instanceUrl?.match(/https:\/\/([^.]+)/)?.[1] || '';
+    }
 
     const data: AdminData = {
       inventory: {
@@ -284,6 +257,7 @@ export const load: PageServerLoad = async ({ locals }) => {
       scheduledJobs,
       jobsRunning,
       organizationId: orgId,
+      instanceUrl: locals.instanceUrl || '',
       isDemo: false,
     };
 
@@ -292,4 +266,35 @@ export const load: PageServerLoad = async ({ locals }) => {
     console.error('Failed to fetch admin data:', error);
     return { data: { ...DEMO_DATA, isDemo: false, error: 'Failed to load admin data' } };
   }
+};
+
+export const actions: Actions = {
+  refreshLicense: async ({ locals }) => {
+    if (!hasValidCredentials(locals)) {
+      return fail(401, { error: 'Not authenticated' });
+    }
+
+    try {
+      // Clear all caches to force a fresh fetch
+      clearAllCaches();
+      
+      // Re-fetch API settings
+      await fetchApiSettings(locals.instanceUrl!, locals.accessToken!);
+      
+      // Fetch fresh license from Sapien
+      const license = await getLicenseFromSapien(locals.instanceUrl!, locals.accessToken!);
+      
+      if (!license) {
+        return fail(500, { error: 'Failed to fetch license from Sapien' });
+      }
+
+      console.log('[Admin] License refreshed successfully');
+      
+      // Return success - the page will reload with fresh data
+      return { success: true, message: 'License refreshed successfully' };
+    } catch (error) {
+      console.error('[Admin] Failed to refresh license:', error);
+      return fail(500, { error: error instanceof Error ? error.message : 'Failed to refresh license' });
+    }
+  },
 };

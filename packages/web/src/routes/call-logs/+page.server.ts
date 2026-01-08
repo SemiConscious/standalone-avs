@@ -1,5 +1,5 @@
 import { querySalesforce, hasValidCredentials } from '$lib/server/salesforce';
-import { getSapienConfig, getSapienJwt, canGetSapienJwt } from '$lib/server/sapien';
+import { canUseSapienApi, getSapienAccessToken, getOrganizationId } from '$lib/server/gatekeeper';
 import { env } from '$env/dynamic/private';
 import type { PageServerLoad } from './$types';
 
@@ -130,23 +130,17 @@ const DEMO_USERS = [
 ];
 
 export const load: PageServerLoad = async ({ locals, url }) => {
-  // Check if we can play recordings (Sapien API configured)
-  // We need SAPIEN_HOST to be set, and we'll get the org ID from the JWT when needed
-  const sapienHost = env.SAPIEN_HOST;
+  // Check if we can play recordings (Sapien API configured and accessible)
   let canPlayRecordings = false;
   
-  // If Sapien host is configured and we have Salesforce auth, try to verify Sapien access
-  if (sapienHost && canGetSapienJwt(locals)) {
+  // If we have Salesforce auth, try to verify Sapien access
+  if (canUseSapienApi(locals)) {
     try {
-      // Get the JWT to verify we can access Sapien and extract org ID
-      await getSapienJwt(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        'enduser:basic'
-      );
+      // Get the Sapien access token to verify we can access Sapien
+      await getSapienAccessToken(locals.instanceUrl!, locals.accessToken!);
       // If we got here, we can access Sapien
-      const sapienConfig = getSapienConfig();
-      canPlayRecordings = !!sapienConfig.organizationId;
+      const organizationId = getOrganizationId();
+      canPlayRecordings = !!organizationId;
     } catch (e) {
       console.warn('Could not verify Sapien access for recordings:', e);
       canPlayRecordings = false;

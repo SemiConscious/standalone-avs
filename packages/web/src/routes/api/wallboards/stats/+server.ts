@@ -2,12 +2,10 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { env } from '$env/dynamic/private';
 import { 
-  getSapienJwt, 
-  getSapienConfig, 
-  sapienRequest,
-  canGetSapienJwt,
-  SAPIEN_SCOPES 
-} from '$lib/server/sapien';
+  canUseSapienApi,
+  sapienApiRequest,
+  getOrganizationId,
+} from '$lib/server/gatekeeper';
 import { querySalesforce, hasValidCredentials } from '$lib/server/salesforce';
 
 interface SapienCall {
@@ -75,27 +73,20 @@ export const GET: RequestHandler = async ({ locals }) => {
   };
 
   // Try to get real-time call data from Sapien
-  if (canGetSapienJwt(locals) && sapienHost) {
+  if (canUseSapienApi(locals)) {
     try {
-      // Use omni:basic scope for call monitoring access
-      const jwt = await getSapienJwt(
-        locals.instanceUrl,
-        locals.accessToken,
-        SAPIEN_SCOPES.OMNI_BASIC
-      );
-
-      // Get org ID from cached JWT
-      const sapienConfig = getSapienConfig();
-      if (!sapienConfig.organizationId) {
-        throw new Error('No organization ID in JWT');
+      // Get org ID from cached settings
+      const organizationId = getOrganizationId();
+      if (!organizationId) {
+        throw new Error('No organization ID configured');
       }
 
-      // Fetch active calls
-      const calls = await sapienRequest<SapienCall[]>(
-        sapienHost,
-        jwt,
+      // Fetch active calls using Sapien access token (same as RestClient in avs-sfdx)
+      const calls = await sapienApiRequest<SapienCall[]>(
+        locals.instanceUrl!,
+        locals.accessToken!,
         'GET',
-        `/organisation/${sapienConfig.organizationId}/call`
+        `/organisation/${organizationId}/call`
       );
 
       if (Array.isArray(calls)) {

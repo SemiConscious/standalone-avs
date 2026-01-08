@@ -15,9 +15,26 @@
     targetPos: { x: number; y: number };
     selected?: boolean;
     onClick?: (e: MouseEvent) => void;
+    onDelete?: () => void;
   }
   
-  let { edge, sourcePos, targetPos, selected = false, onClick }: Props = $props();
+  let { edge, sourcePos, targetPos, selected = false, onClick, onDelete }: Props = $props();
+  
+  let isHovered = $state(false);
+  
+  function handleContextMenu(e: MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    // Right-click to delete edge
+    onDelete?.();
+  }
+  
+  function handleDoubleClick(e: MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    // Double-click to delete edge
+    onDelete?.();
+  }
   
   // Calculate bezier curve control points for smooth edges
   // Control points are positioned to ensure edges leave/enter perpendicular to nodes
@@ -53,8 +70,17 @@
   });
 </script>
 
-<g class="flow-edge pointer-events-auto" data-edge-id={edge.id}>
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<g 
+  class="flow-edge pointer-events-auto" 
+  data-edge-id={edge.id}
+  role="button"
+  tabindex="-1"
+  onmouseenter={() => isHovered = true}
+  onmouseleave={() => isHovered = false}
+>
   <!-- Invisible wider path for easier clicking -->
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
   <path
     d={pathData()}
     fill="none"
@@ -62,16 +88,30 @@
     stroke-width="20"
     class="cursor-pointer"
     onclick={onClick}
+    oncontextmenu={handleContextMenu}
+    ondblclick={handleDoubleClick}
   />
+  
+  <!-- Hover highlight - shows when hovering to indicate edge is clickable -->
+  {#if isHovered && !selected}
+    <path
+      d={pathData()}
+      fill="none"
+      stroke="rgb(var(--color-surface-300))"
+      stroke-width="6"
+      stroke-opacity="0.4"
+      class="pointer-events-none"
+    />
+  {/if}
   
   <!-- Visible edge path -->
   <path
     d={pathData()}
     fill="none"
-    stroke={selected ? 'rgb(var(--color-primary-500))' : 'rgb(var(--color-surface-400))'}
-    stroke-width={selected ? 3 : 2}
+    stroke={selected ? 'rgb(var(--color-primary-500))' : isHovered ? 'rgb(var(--color-surface-300))' : 'rgb(var(--color-surface-400))'}
+    stroke-width={selected ? 3 : isHovered ? 2.5 : 2}
     marker-end={selected ? 'url(#arrowhead-selected)' : 'url(#arrowhead)'}
-    class="transition-all duration-150"
+    class="transition-all duration-150 pointer-events-none"
   />
   
   <!-- Selection highlight -->
@@ -82,7 +122,32 @@
       stroke="rgb(var(--color-primary-500))"
       stroke-width="6"
       stroke-opacity="0.2"
+      class="pointer-events-none"
     />
+  {/if}
+  
+  <!-- Delete button on hover -->
+  {#if isHovered || selected}
+    {@const midX = (sourcePos.x + targetPos.x) / 2}
+    {@const midY = (sourcePos.y + targetPos.y) / 2}
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+    <g 
+      class="cursor-pointer" 
+      role="button"
+      tabindex="-1"
+      onclick={(e) => { e.stopPropagation(); onDelete?.(); }}
+      transform="translate({midX}, {midY})"
+    >
+      <circle 
+        r="10" 
+        fill={selected ? 'rgb(var(--color-primary-500))' : 'rgb(var(--color-surface-600))'}
+        stroke="rgb(var(--color-surface-400))"
+        stroke-width="1"
+      />
+      <!-- X icon -->
+      <line x1="-4" y1="-4" x2="4" y2="4" stroke="white" stroke-width="2" stroke-linecap="round" />
+      <line x1="4" y1="-4" x2="-4" y2="4" stroke="white" stroke-width="2" stroke-linecap="round" />
+    </g>
   {/if}
   
   <!-- Edge label (if needed) -->

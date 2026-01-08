@@ -2,7 +2,7 @@
   import { goto } from '$app/navigation';
   import { enhance } from '$app/forms';
   import { Card, Button } from '$lib/components/ui';
-  import { AlertCircle, ArrowLeft, Trash2 } from 'lucide-svelte';
+  import { AlertCircle } from 'lucide-svelte';
   import { writable, get } from 'svelte/store';
   import FlowEditor from './FlowEditor.svelte';
   import { transformLegacyPolicy } from '$lib/policy-editor';
@@ -67,7 +67,10 @@
   let policyName = $state(data.policy?.name || 'Untitled');
   
   // Initial data for FlowEditor
-  const initialNodes = data.policy?.body?.nodes || [];
+  const initialNodes = (data.policy?.body?.nodes || []).map(n => ({
+    ...n,
+    type: n.type || 'default' // Ensure type is always defined
+  }));
   const initialEdges = data.policy?.body?.edges || [];
   
   // Create writable stores for FlowEditor
@@ -153,41 +156,15 @@
   <title>{policyName} | Policy Editor | Natterbox AVS</title>
 </svelte:head>
 
-<div class="policy-editor-page h-screen flex flex-col">
-  <!-- Header Bar -->
-  <header class="page-header h-12 px-4 flex items-center justify-between shrink-0">
-    <div class="flex items-center gap-4">
-      <button 
-        onclick={() => goto('/routing-policies')} 
-        class="back-btn flex items-center gap-2 px-3 py-1.5 text-sm rounded transition-colors"
-      >
-        <ArrowLeft class="w-4 h-4" />
-        <span>Back to Policies</span>
-      </button>
-      
-      <div class="header-divider"></div>
-      
-      <div class="flex flex-col">
-        <h1 class="text-sm font-semibold">{policyName}</h1>
-        {#if data.isDemo}
-          <span class="text-xs text-amber-400">Demo Mode</span>
-        {/if}
-      </div>
-    </div>
-    
-    <!-- Delete button -->
-    {#if !data.isDemo && data.policy?.id}
-      <button 
-        onclick={handleDeleteClick}
-        disabled={isDeleting}
-        class="delete-btn flex items-center gap-2 px-3 py-1.5 text-sm rounded transition-colors"
-        title="Delete policy"
-      >
-        <Trash2 class="w-4 h-4" />
-        <span>{isDeleting ? 'Deleting...' : 'Delete'}</span>
-      </button>
+<div class="policy-editor-page flex flex-col h-[calc(100vh-64px)]">
+  <!-- Page Header -->
+  <div class="page-header-section px-6 py-4 shrink-0">
+    <div class="text-sm text-surface-400">Edit policy</div>
+    <h1 class="text-xl font-semibold text-surface-100">{policyName}</h1>
+    {#if data.isDemo}
+      <span class="text-xs text-amber-400">Demo Mode</span>
     {/if}
-  </header>
+  </div>
 
   <!-- Main content -->
   <div class="flex-1 relative overflow-hidden">
@@ -212,7 +189,10 @@
         groups={data.groups || []}
         sounds={data.sounds || []}
         phoneNumbers={data.phoneNumbers || []}
-        onSave={handleSave} 
+        onSave={handleSave}
+        onDelete={handleDeleteClick}
+        {isDeleting}
+        canDelete={!data.isDemo && !!data.policy?.id}
       />
     {/if}
     
@@ -311,24 +291,22 @@
     color: rgb(var(--color-surface-100));
   }
   
-  .page-header {
+  .page-header-section {
     background-color: rgb(var(--color-surface-800));
     border-bottom: 1px solid rgb(var(--color-surface-700));
   }
   
-  .back-btn {
-    color: rgb(var(--color-surface-300));
+  /* Remove default app-content padding for full-bleed editor */
+  :global(.app-content:has(.policy-editor-page)) {
+    padding: 0 !important;
   }
   
-  .back-btn:hover {
-    background-color: rgb(var(--color-surface-700));
+  .text-surface-400 {
+    color: rgb(var(--color-surface-400));
+  }
+  
+  .text-surface-100 {
     color: rgb(var(--color-surface-100));
-  }
-  
-  .header-divider {
-    width: 1px;
-    height: 1.5rem;
-    background-color: rgb(var(--color-surface-700));
   }
   
   .btn-primary {
@@ -338,22 +316,6 @@
   
   .btn-primary:hover {
     background-color: rgb(var(--color-primary-500));
-  }
-  
-  .delete-btn {
-    color: rgb(var(--color-surface-300));
-    border: 1px solid rgb(var(--color-surface-600));
-  }
-  
-  .delete-btn:hover {
-    background-color: rgba(239, 68, 68, 0.1);
-    color: rgb(239, 68, 68);
-    border-color: rgb(239, 68, 68);
-  }
-  
-  .delete-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
   }
   
   .bg-surface-800 {

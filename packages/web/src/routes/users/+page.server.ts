@@ -1,4 +1,7 @@
-import { querySalesforce, hasValidCredentials } from '$lib/server/salesforce';
+import { querySalesforce, hasValidCredentials, deleteSalesforce } from '$lib/server/salesforce';
+import type { Actions } from './$types';
+import { fail } from '@sveltejs/kit';
+import { env } from '$env/dynamic/private';
 import {
   parsePaginationParams,
   buildSoqlOrderBy,
@@ -247,4 +250,41 @@ export const load: PageServerLoad = async ({ locals, url }) => {
       error: 'Failed to load users',
     };
   }
+};
+
+export const actions: Actions = {
+  delete: async ({ locals, request }) => {
+    if (!hasValidCredentials(locals)) {
+      return fail(401, { error: 'Not authenticated' });
+    }
+
+    const formData = await request.formData();
+    const userId = formData.get('userId') as string;
+
+    if (!userId) {
+      return fail(400, { error: 'User ID is required' });
+    }
+
+    const NAMESPACE = env.SALESFORCE_PACKAGE_NAMESPACE || 'nbavs';
+
+    try {
+      // Delete from Salesforce
+      await deleteSalesforce(
+        locals.instanceUrl!,
+        locals.accessToken!,
+        `${NAMESPACE}__User__c`,
+        userId
+      );
+
+      // Note: In a full implementation, you might also want to delete from Sapien
+      // if the user has a Sapien ID, but for now we'll just delete from Salesforce
+
+      return { success: true, message: 'User deleted successfully' };
+    } catch (error) {
+      console.error('Failed to delete user:', error);
+      return fail(500, {
+        error: error instanceof Error ? error.message : 'Failed to delete user',
+      });
+    }
+  },
 };

@@ -25,6 +25,9 @@
     name?: string;
     title?: string;
     templateClass?: string;
+    outputConnectorsAllowed?: boolean;
+    connectedTo?: string | null;
+    output?: { connectedTo?: string | null };
     data?: { name?: string; label?: string; title?: string };
   }
   
@@ -33,6 +36,9 @@
     title?: string;
     name?: string;
     templateClass?: string;
+    outputConnectorsAllowed?: boolean;
+    connectedTo?: string | null;
+    output?: { connectedTo?: string | null };
     data?: { title?: string; name?: string; label?: string };
   }
   
@@ -58,12 +64,48 @@
   interface Props {
     node: FlowNodeData;
     selected?: boolean;
+    connectedChildIds?: Set<string>; // IDs of children that have edges from them
+    footerConnected?: boolean; // Whether the footer connector has an edge
+    inputConnected?: boolean; // Whether the input connector has an incoming edge
+    isCreatingEdge?: boolean; // Whether an edge is being created (to highlight valid targets)
     onDoubleClick?: () => void;
     onChildDoubleClick?: (childId: string, child: SubItem | Output) => void;
     onAppDrop?: (nodeId: string, appType: string, appLabel: string) => void;
   }
   
-  let { node, selected = false, onDoubleClick, onChildDoubleClick, onAppDrop }: Props = $props();
+  let { node, selected = false, connectedChildIds = new Set(), footerConnected = false, inputConnected = false, isCreatingEdge = false, onDoubleClick, onChildDoubleClick, onAppDrop }: Props = $props();
+  
+  // Check if a child item supports output connectors
+  function childSupportsOutput(item: SubItem | Output): boolean {
+    // If explicitly set to false, don't show output
+    if (item.outputConnectorsAllowed === false) return false;
+    // If explicitly set to true, show output
+    if (item.outputConnectorsAllowed === true) return true;
+    
+    // Entry point nodes' children don't have individual output connectors
+    // The container's footer output handles the connection
+    const entryPointTypes = [
+      'inboundNumber', 'extensionNumber', 'inboundMessage', 'fromPolicy',
+      'sipTrunk', 'invokableDestination', 'digital', 'ddi'
+    ];
+    const entryPointClasses = [
+      'ModNumber', 'ModNumber_Public', 'ModFromPolicy', 'ModExtension',
+      'ModInboundMessage', 'ModSipTrunk', 'ModInvokable', 'ModDigital'
+    ];
+    if (entryPointTypes.includes(effectiveType) || 
+        entryPointClasses.includes(node.data?.templateClass as string || '')) {
+      return false;
+    }
+    
+    // Default: check templateClass - some apps don't support outputs
+    // Apps like Speak, Record, Notify just pass control to next child
+    const noOutputClasses = [
+      'ModAction_Say', 'ModAction_Record', 'ModAction_Notify',
+      'ModAction_Pause', 'ModAction_Debug', 'ModAction_Log',
+      'ModAction_SetProperty', 'ModAction_ManageProperty'
+    ];
+    return !noOutputClasses.includes(item.templateClass || '');
+  }
   
   // Handle double-click on a child item
   function handleChildDblClick(e: MouseEvent, childId: string, child: SubItem | Output) {
@@ -116,7 +158,7 @@
   function getNodeType(templateClass?: string, nodeType?: string): string {
     const classMap: Record<string, string> = {
       'ModAction': 'action',
-      'ModFromPolicy': 'init',
+      'ModFromPolicy': 'fromPolicy',
       'ModNumber': 'inboundNumber',
       'ModNumber_Public': 'inboundNumber',
       'ModAction_Say': 'speak',
@@ -152,10 +194,10 @@
     natterboxAI: { header: '#4ea8a0', footer: '#4ea8a0' },   // Muted teal
     switchBoard: { header: '#c46b8a', footer: '#c46b8a' },   // Dusty rose
     finish: { header: '#5e6578', footer: '#5e6578' },        // Slate gray
-    toPolicy: { header: '#8e6aaf', footer: '#8e6aaf' },      // Soft purple
-    fromPolicy: { header: '#8e6aaf', footer: '#8e6aaf' },
+    toPolicy: { header: '#9061c2', footer: '#9061c2' },      // Purple (matching entry points)
+    fromPolicy: { header: '#9061c2', footer: '#9061c2' },   // Purple (same as Inbound Numbers)
     omniChannelFlow: { header: '#4a9ec7', footer: '#4a9ec7' }, // Soft blue
-    inboundNumber: { header: '#d4a24a', footer: '#d4a24a' }, // Warm gold
+    inboundNumber: { header: '#d4a24a', footer: '#d4a24a' }, // Gold
     digital: { header: '#d4a24a', footer: '#d4a24a' },
     extensionNumber: { header: '#c98860', footer: '#c98860' }, // Terracotta
     invokableDestination: { header: '#4a98b0', footer: '#4a98b0' }, // Ocean blue
@@ -166,28 +208,31 @@
   };
   
   // Simple node icon/color config
-  const nodeConfig: Record<string, { icon: typeof Play; iconColor: string; borderHue: string }> = {
-    init: { icon: Play, iconColor: '#22c55e', borderHue: '142' },
-    input: { icon: PhoneIncoming, iconColor: '#3b82f6', borderHue: '217' },
-    output: { icon: PhoneOutgoing, iconColor: '#ef4444', borderHue: '0' },
-    end: { icon: Square, iconColor: '#ef4444', borderHue: '0' },
-    callQueue: { icon: Users, iconColor: '#f59e0b', borderHue: '38' },
-    huntGroup: { icon: Users, iconColor: '#f97316', borderHue: '25' },
-    connectCall: { icon: PhoneOutgoing, iconColor: '#06b6d4', borderHue: '188' },
-    rule: { icon: GitBranch, iconColor: '#8b5cf6', borderHue: '258' },
-    speak: { icon: MessageSquare, iconColor: '#ec4899', borderHue: '330' },
-    recordCall: { icon: Mic, iconColor: '#f43f5e', borderHue: '350' },
-    voicemail: { icon: Voicemail, iconColor: '#3b82f6', borderHue: '217' },
-    natterboxAI: { icon: Bot, iconColor: '#a855f7', borderHue: '280' },
-    queryObject: { icon: Database, iconColor: '#10b981', borderHue: '160' },
-    createRecord: { icon: FileText, iconColor: '#14b8a6', borderHue: '173' },
-    manageProperties: { icon: Settings, iconColor: '#64748b', borderHue: '215' },
-    notify: { icon: Send, iconColor: '#0ea5e9', borderHue: '199' },
-    retry: { icon: Clock, iconColor: '#eab308', borderHue: '48' },
-    switchBoard: { icon: Search, iconColor: '#84cc16', borderHue: '84' },
-    debug: { icon: AlertTriangle, iconColor: '#ef4444', borderHue: '0' },
-    omniChannelFlow: { icon: Workflow, iconColor: '#d946ef', borderHue: '292' },
-    action: { icon: Play, iconColor: '#2ecbbf', borderHue: '174' },
+  const nodeConfig: Record<string, { icon: typeof Play; iconColor: string; borderHue: string; displayName?: string }> = {
+    init: { icon: Play, iconColor: '#22c55e', borderHue: '142', displayName: 'Start' },
+    input: { icon: PhoneIncoming, iconColor: '#3b82f6', borderHue: '217', displayName: 'Input' },
+    output: { icon: PhoneOutgoing, iconColor: '#ef4444', borderHue: '0', displayName: 'Output' },
+    end: { icon: Square, iconColor: '#ef4444', borderHue: '0', displayName: 'End' },
+    callQueue: { icon: Users, iconColor: '#f59e0b', borderHue: '38', displayName: 'Call Queue' },
+    huntGroup: { icon: Users, iconColor: '#f97316', borderHue: '25', displayName: 'Hunt Group' },
+    connectCall: { icon: PhoneOutgoing, iconColor: '#06b6d4', borderHue: '188', displayName: 'Connect Call' },
+    rule: { icon: GitBranch, iconColor: '#8b5cf6', borderHue: '258', displayName: 'Rule' },
+    speak: { icon: MessageSquare, iconColor: '#ec4899', borderHue: '330', displayName: 'Speak' },
+    recordCall: { icon: Mic, iconColor: '#f43f5e', borderHue: '350', displayName: 'Record Call' },
+    voicemail: { icon: Voicemail, iconColor: '#3b82f6', borderHue: '217', displayName: 'Voicemail' },
+    natterboxAI: { icon: Bot, iconColor: '#a855f7', borderHue: '280', displayName: 'Natterbox AI' },
+    queryObject: { icon: Database, iconColor: '#10b981', borderHue: '160', displayName: 'Query Object' },
+    createRecord: { icon: FileText, iconColor: '#14b8a6', borderHue: '173', displayName: 'Create Record' },
+    manageProperties: { icon: Settings, iconColor: '#64748b', borderHue: '215', displayName: 'Manage Properties' },
+    notify: { icon: Send, iconColor: '#0ea5e9', borderHue: '199', displayName: 'Notify' },
+    retry: { icon: Clock, iconColor: '#eab308', borderHue: '48', displayName: 'Retry' },
+    switchBoard: { icon: Search, iconColor: '#84cc16', borderHue: '84', displayName: 'Switchboard' },
+    debug: { icon: AlertTriangle, iconColor: '#ef4444', borderHue: '0', displayName: 'Debug' },
+    omniChannelFlow: { icon: Workflow, iconColor: '#d946ef', borderHue: '292', displayName: 'Omni Channel Flow' },
+    action: { icon: Play, iconColor: '#2ecbbf', borderHue: '174', displayName: 'Action' },
+    inboundNumber: { icon: PhoneIncoming, iconColor: '#9061c2', borderHue: '270', displayName: 'Inbound Numbers' },
+    fromPolicy: { icon: Workflow, iconColor: '#9061c2', borderHue: '270', displayName: 'From Policy' },
+    extensionNumber: { icon: PhoneIncoming, iconColor: '#9061c2', borderHue: '270', displayName: 'Extension' },
     default: { icon: Settings, iconColor: '#94a3b8', borderHue: '215' }
   };
   
@@ -195,8 +240,13 @@
   const config = $derived(nodeConfig[effectiveType] || nodeConfig.default);
   const Icon = $derived(config.icon);
   
-  // Label
+  // Label - for container nodes, use the config displayName (e.g., "Action")
+  // For simple nodes, use the node's title/name
   const label = $derived(() => {
+    // For container nodes, use the type's display name
+    if (isContainer && config?.displayName) {
+      return config.displayName;
+    }
     if (node.data?.label) return node.data.label;
     return getNodeDisplayTitle({
       title: node.data?.title,
@@ -286,7 +336,7 @@
 {#if isContainer}
   <!-- Container Node (Burger Style) -->
   <div 
-    class="container-node absolute select-none transition-all duration-200"
+    class="container-node absolute select-none"
     class:selected
     style="
       left: {node.position.x}px; 
@@ -300,10 +350,14 @@
   >
     <!-- Input Handle (on upper bun) -->
     {#if hasInputHandle}
+      {@const inputConnectedBg = "url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\" width=\"16\" height=\"16\"><circle cx=\"8\" cy=\"8\" r=\"8\" fill=\"%23a6b8d2\"/><polygon points=\"5.74 12.4 12.06 7.92 5.74 3.44 5.74 4.26 10.9 7.92 5.74 11.57 5.74 12.4\" fill=\"%23fff\" /></svg>') no-repeat 50%"}
+      {@const inputUnconnectedBg = "url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\" width=\"16\" height=\"16\"><circle cx=\"8\" cy=\"8\" r=\"8\" fill=\"%23EC6281\"/><polygon points=\"5.74 12.4 12.06 7.92 5.74 3.44 5.74 4.26 10.9 7.92 5.74 11.57 5.74 12.4\" fill=\"%23fff\" /></svg>') no-repeat 50%"}
+      {@const inputTargetBg = "url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\" width=\"16\" height=\"16\"><circle cx=\"8\" cy=\"8\" r=\"8\" fill=\"%234BC076\"/><polygon points=\"5.74 12.4 12.06 7.92 5.74 3.44 5.74 4.26 10.9 7.92 5.74 11.57 5.74 12.4\" fill=\"%23fff\" /></svg>') no-repeat 50%"}
       <div 
         class="node-handle input-handle"
+        class:pulse-target={isCreatingEdge}
         data-handle-type="target"
-        style="top: {headerHeight / 2}px;"
+        style="top: {headerHeight / 2}px; background: {isCreatingEdge ? inputTargetBg : (inputConnected ? inputConnectedBg : inputUnconnectedBg)}; background-size: contain;"
       ></div>
     {/if}
     
@@ -330,6 +384,11 @@
         aria-label="Drop zone for apps"
       >
         {#each childItems() as item, index (item.id || index)}
+          {@const itemAny = item as unknown as Record<string, unknown>}
+          {@const connectedTo = itemAny.connectedTo as string | null | undefined}
+          <!-- Only show as connected if connectedTo points to a real visible node (not "finish" which is invisible) -->
+          {@const isConnected = Boolean(connectedTo && connectedTo !== 'null' && connectedTo !== 'undefined' && connectedTo !== 'finish')}
+          {@const showOutput = childSupportsOutput(item)}
           <div 
             class="child-item"
             ondblclick={(e) => handleChildDblClick(e, item.id, item)}
@@ -338,12 +397,18 @@
           >
             <span class="item-name">{getItemName(item)}</span>
             
-            <!-- Per-child output handle (pink circle with +) -->
-            <div 
-              class="child-output-handle"
-              data-handle-type="source"
-              data-handle-id={item.id}
-            ></div>
+            <!-- Per-child output handle - only shown if child supports outputs -->
+            {#if showOutput}
+              {@const connectedBg = "url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\" width=\"16\" height=\"16\"><circle cx=\"8\" cy=\"8\" r=\"8\" fill=\"%23a6b8d2\"/><circle cx=\"8\" cy=\"8\" r=\"4\" fill=\"%23fff\"/></svg>') no-repeat 50%"}
+              {@const unconnectedBg = "url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\" width=\"16\" height=\"16\"><circle cx=\"8\" cy=\"8\" r=\"8\" fill=\"%23EC6281\"/><polygon points=\"8.29 3.47 7.69 3.47 7.69 7.71 3.47 7.71 3.47 8.31 7.69 8.31 7.69 12.53 8.29 12.53 8.29 8.31 12.53 8.31 12.53 7.71 8.29 7.71\" fill=\"%23fff\"/></svg>') no-repeat 50%"}
+              <div 
+                class="child-output-handle"
+                class:connected={isConnected}
+                style="background: {isConnected ? connectedBg : unconnectedBg}; background-size: contain;"
+                data-handle-type="source"
+                data-handle-id={item.id}
+              ></div>
+            {/if}
           </div>
         {/each}
       </div>
@@ -355,11 +420,14 @@
     <!-- Lower Bun (Footer) - Default Output -->
     <div 
       class="container-footer"
-      style="background-color: {colors.footer}; height: {footerHeight}px;"
+      style="background-color: {colors?.footer}; height: {footerHeight}px;"
     >
       {#if hasOutputHandle}
+        {@const footerConnectedBg = "url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\" width=\"16\" height=\"16\"><circle cx=\"8\" cy=\"8\" r=\"8\" fill=\"%23a6b8d2\"/><circle cx=\"8\" cy=\"8\" r=\"4\" fill=\"%23fff\"/></svg>') no-repeat 50%"}
+        {@const footerUnconnectedBg = "url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\" width=\"16\" height=\"16\"><circle cx=\"8\" cy=\"8\" r=\"8\" fill=\"%23EC6281\"/><polygon points=\"8.29 3.47 7.69 3.47 7.69 7.71 3.47 7.71 3.47 8.31 7.69 8.31 7.69 12.53 8.29 12.53 8.29 8.31 12.53 8.31 12.53 7.71 8.29 7.71\" fill=\"%23fff\"/></svg>') no-repeat 50%"}
         <div 
           class="node-handle output-handle footer-output"
+          style="background: {footerConnected ? footerConnectedBg : footerUnconnectedBg}; background-size: contain;"
           data-handle-type="source"
           data-handle-id="default"
         ></div>
@@ -369,7 +437,7 @@
 {:else}
   <!-- Simple Node -->
   <div 
-    class="flow-node absolute rounded-lg cursor-move select-none transition-all"
+    class="flow-node absolute rounded-lg cursor-move select-none"
     class:selected
     style="
       left: {node.position.x}px; 
@@ -385,10 +453,14 @@
   >
     <!-- Input Handle -->
     {#if hasInputHandle}
+      {@const inputConnectedBg = "url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\" width=\"16\" height=\"16\"><circle cx=\"8\" cy=\"8\" r=\"8\" fill=\"%23a6b8d2\"/><polygon points=\"5.74 12.4 12.06 7.92 5.74 3.44 5.74 4.26 10.9 7.92 5.74 11.57 5.74 12.4\" fill=\"%23fff\" /></svg>') no-repeat 50%"}
+      {@const inputUnconnectedBg = "url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\" width=\"16\" height=\"16\"><circle cx=\"8\" cy=\"8\" r=\"8\" fill=\"%23EC6281\"/><polygon points=\"5.74 12.4 12.06 7.92 5.74 3.44 5.74 4.26 10.9 7.92 5.74 11.57 5.74 12.4\" fill=\"%23fff\" /></svg>') no-repeat 50%"}
+      {@const inputTargetBg = "url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\" width=\"16\" height=\"16\"><circle cx=\"8\" cy=\"8\" r=\"8\" fill=\"%234BC076\"/><polygon points=\"5.74 12.4 12.06 7.92 5.74 3.44 5.74 4.26 10.9 7.92 5.74 11.57 5.74 12.4\" fill=\"%23fff\" /></svg>') no-repeat 50%"}
       <div 
         class="simple-handle input-handle"
+        class:pulse-target={isCreatingEdge}
         data-handle-type="target"
-        style="top: {height / 2}px;"
+        style="top: {height / 2}px; background: {isCreatingEdge ? inputTargetBg : (inputConnected ? inputConnectedBg : inputUnconnectedBg)}; background-size: contain;"
       ></div>
     {/if}
     
@@ -462,6 +534,8 @@
     overflow: visible; /* Allow handles to extend beyond container */
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
     cursor: move;
+    /* Only transition visual properties, not position (left/top) to avoid drag lag */
+    transition: box-shadow 0.15s ease;
   }
   
   .container-node:hover {
@@ -508,7 +582,7 @@
   /* Body - Contains child items (no landing zone pattern) */
   .container-body {
     background-color: #eef1f6;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
   }
   
   .container-body.drag-over {
@@ -545,9 +619,10 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     padding-left: 6px;
+    text-align: right;
   }
   
-  /* Per-child output handle (pink circle with +) */
+  /* Per-child output handle - DEBUG: using simple colors */
   .child-output-handle {
     position: absolute;
     right: -7px;
@@ -559,14 +634,12 @@
     cursor: crosshair;
     transition: all 0.15s ease;
     z-index: 10;
-    background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="8" fill="%23EC6281"/><polygon points="8.29 3.47 7.69 3.47 7.69 7.71 3.47 7.71 3.47 8.31 7.69 8.31 7.69 12.53 8.29 12.53 8.29 8.31 12.53 8.31 12.53 7.71 8.29 7.71" fill="%23fff"/></svg>') no-repeat 50%;
-    background-size: contain;
+    /* No background here - set via inline style */
   }
   
   .child-output-handle:hover {
     transform: translateY(-50%) scale(1.2);
-    background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="8" fill="%234BC076"/><polygon points="8.29 3.47 7.69 3.47 7.69 7.71 3.47 7.71 3.47 8.31 7.69 8.31 7.69 12.53 8.29 12.53 8.29 8.31 12.53 8.31 12.53 7.71 8.29 7.71" fill="%23fff"/></svg>') no-repeat 50%;
-    background-size: contain;
+    background-color: green !important;
   }
   
   /* Lower Bun - Footer */
@@ -599,28 +672,25 @@
     z-index: 10;
   }
   
+  /* Input handle - background is set via inline style based on connected state */
   .node-handle.input-handle {
     left: -7px;
     transform: translateY(-50%);
-    background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="8" fill="%23a6b8d2"/><polygon points="5.74 12.4 12.06 7.92 5.74 3.44 5.74 4.26 10.9 7.92 5.74 11.57 5.74 12.4" fill="%23fff" /></svg>') no-repeat 50%;
-    background-size: contain;
   }
   
   .node-handle.input-handle:hover {
     transform: translateY(-50%) scale(1.3);
-    background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="8" fill="%234BC076"/><polygon points="5.74 12.4 12.06 7.92 5.74 3.44 5.74 4.26 10.9 7.92 5.74 11.57 5.74 12.4" fill="%23fff" /></svg>') no-repeat 50%;
-    background-size: contain;
+    background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="8" fill="%234BC076"/><polygon points="5.74 12.4 12.06 7.92 5.74 3.44 5.74 4.26 10.9 7.92 5.74 11.57 5.74 12.4" fill="%23fff" /></svg>') no-repeat 50% !important;
+    background-size: contain !important;
   }
   
-  .node-handle.output-handle {
-    background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="8" fill="%23EC6281"/><polygon points="8.29 3.47 7.69 3.47 7.69 7.71 3.47 7.71 3.47 8.31 7.69 8.31 7.69 12.53 8.29 12.53 8.29 8.31 12.53 8.31 12.53 7.71 8.29 7.71" fill="%23fff"/></svg>') no-repeat 50%;
-    background-size: contain;
-  }
+  /* Footer output handle - background is set via inline style based on connected state */
   
-  .node-handle.output-handle:hover {
+  .node-handle.output-handle:hover,
+  .footer-output:hover {
     transform: translateY(-50%) scale(1.3);
-    background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="8" fill="%234BC076"/><polygon points="8.29 3.47 7.69 3.47 7.69 7.71 3.47 7.71 3.47 8.31 7.69 8.31 7.69 12.53 8.29 12.53 8.29 8.31 12.53 8.31 12.53 7.71 8.29 7.71" fill="%23fff"/></svg>') no-repeat 50%;
-    background-size: contain;
+    background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="8" fill="%234BC076"/><polygon points="8.29 3.47 7.69 3.47 7.69 7.71 3.47 7.71 3.47 8.31 7.69 8.31 7.69 12.53 8.29 12.53 8.29 8.31 12.53 8.31 12.53 7.71 8.29 7.71" fill="%23fff"/></svg>') no-repeat 50% !important;
+    background-size: contain !important;
   }
   
   /* ===== Simple Node Styles ===== */
@@ -628,6 +698,8 @@
     background-color: rgb(var(--color-surface-800));
     border: 1px solid hsl(var(--node-border-hue, 215), 30%, 40%);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    /* Only transition visual properties, not position (left/top) to avoid drag lag */
+    transition: box-shadow 0.15s ease, border-color 0.15s ease;
   }
   
   .flow-node:hover {
@@ -673,39 +745,43 @@
     font-style: italic;
   }
   
-  /* Simple Node Handles */
+  /* Simple Node Handles - background is set via inline style for input handles */
   .simple-handle {
     position: absolute;
     width: 10px;
     height: 10px;
     border-radius: 50%;
-    background-color: rgb(var(--color-surface-500));
-    border: 2px solid rgb(var(--color-surface-800));
     cursor: crosshair;
     transition: all 0.15s ease;
   }
   
   .simple-handle:hover {
-    background-color: rgb(var(--color-primary-500));
     transform: scale(1.3);
   }
   
   .simple-handle.input-handle {
     left: -5px;
     transform: translateY(-50%);
+    width: 15px;
+    height: 15px;
   }
   
   .simple-handle.input-handle:hover {
     transform: translateY(-50%) scale(1.3);
+    background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="8" fill="%234BC076"/><polygon points="5.74 12.4 12.06 7.92 5.74 3.44 5.74 4.26 10.9 7.92 5.74 11.57 5.74 12.4" fill="%23fff" /></svg>') no-repeat 50% !important;
+    background-size: contain !important;
   }
   
   .simple-handle.output-handle {
     right: -5px;
     transform: translateY(-50%);
+    background-color: rgb(var(--color-surface-500));
+    border: 2px solid rgb(var(--color-surface-800));
   }
   
   .simple-handle.output-handle:hover {
     transform: translateY(-50%) scale(1.3);
+    background-color: rgb(var(--color-primary-500));
   }
   
   .output-handle-true {
@@ -728,6 +804,22 @@
   .output-handle-false:hover {
     transform: translateY(-50%) scale(1.3);
     background-color: #f87171;
+  }
+  
+  /* Pulse animation for target handles during edge creation */
+  .pulse-target {
+    animation: pulse-glow 1s ease-in-out infinite;
+  }
+  
+  @keyframes pulse-glow {
+    0%, 100% {
+      transform: translateY(-50%) scale(1);
+      box-shadow: 0 0 0 0 rgba(75, 192, 118, 0.5);
+    }
+    50% {
+      transform: translateY(-50%) scale(1.2);
+      box-shadow: 0 0 12px 4px rgba(75, 192, 118, 0.6);
+    }
   }
 </style>
 

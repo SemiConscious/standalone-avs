@@ -73,7 +73,7 @@
           <MessageSquare class="w-6 h-6 text-green-500" />
         </div>
         <div>
-          <p class="text-2xl font-bold">{data.stats.smsSentToday.toLocaleString()}</p>
+          <p class="text-2xl font-bold text-text-primary">{data.stats.smsSentToday.toLocaleString()}</p>
           <p class="text-sm text-text-secondary">SMS Sent Today</p>
         </div>
       </div>
@@ -84,7 +84,7 @@
           <MessageSquare class="w-6 h-6 text-blue-500" />
         </div>
         <div>
-          <p class="text-2xl font-bold">{data.stats.smsReceivedToday.toLocaleString()}</p>
+          <p class="text-2xl font-bold text-text-primary">{data.stats.smsReceivedToday.toLocaleString()}</p>
           <p class="text-sm text-text-secondary">SMS Received</p>
         </div>
       </div>
@@ -95,7 +95,7 @@
           <Send class="w-6 h-6 text-green-600" />
         </div>
         <div>
-          <p class="text-2xl font-bold">{data.stats.whatsappSentToday.toLocaleString()}</p>
+          <p class="text-2xl font-bold text-text-primary">{data.stats.whatsappSentToday.toLocaleString()}</p>
           <p class="text-sm text-text-secondary">WhatsApp Sent</p>
         </div>
       </div>
@@ -106,18 +106,18 @@
           <Send class="w-6 h-6 text-teal-500" />
         </div>
         <div>
-          <p class="text-2xl font-bold">{data.stats.whatsappReceivedToday.toLocaleString()}</p>
+          <p class="text-2xl font-bold text-text-primary">{data.stats.whatsappReceivedToday.toLocaleString()}</p>
           <p class="text-sm text-text-secondary">WhatsApp Received</p>
         </div>
       </div>
     </Card>
     <Card>
       <div class="flex items-center gap-3">
-        <div class="p-3 bg-accent/10 rounded-lg">
-          <Phone class="w-6 h-6 text-accent" />
+        <div class="p-3 bg-primary-500/10 rounded-lg">
+          <Phone class="w-6 h-6 text-primary-400" />
         </div>
         <div>
-          <p class="text-2xl font-bold">{data.stats.activeNumbers}</p>
+          <p class="text-2xl font-bold text-text-primary">{data.stats.activeNumbers}</p>
           <p class="text-sm text-text-secondary">Active Numbers</p>
         </div>
       </div>
@@ -126,14 +126,14 @@
 
   <!-- Configuration -->
   <Card>
-    <h2 class="text-lg font-semibold mb-4">Messaging Configuration</h2>
+    <h2 class="text-lg font-semibold mb-4 text-text-primary">Messaging Configuration</h2>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
       <div class="p-4 border border-border rounded-lg">
         <div class="flex items-center justify-between mb-4">
           <div class="flex items-center gap-3">
             <MessageSquare class="w-6 h-6 text-green-500" />
             <div>
-              <h3 class="font-medium">SMS</h3>
+              <h3 class="font-medium text-text-primary">SMS</h3>
             </div>
           </div>
           {#if data.config.smsEnabled}
@@ -177,7 +177,7 @@
           <div class="flex items-center gap-3">
             <Send class="w-6 h-6 text-green-600" />
             <div>
-              <h3 class="font-medium">WhatsApp</h3>
+              <h3 class="font-medium text-text-primary">WhatsApp</h3>
             </div>
           </div>
           {#if data.config.whatsappEnabled && data.config.whatsappConfigured}

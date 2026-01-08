@@ -5,9 +5,10 @@
     padding?: 'none' | 'sm' | 'md' | 'lg';
     class?: string;
     children: Snippet;
+    header?: Snippet;
   }
 
-  let { padding = 'md', class: className = '', children }: Props = $props();
+  let { padding = 'md', class: className = '', children, header }: Props = $props();
 
   const paddingMap = {
     none: '',
@@ -17,8 +18,19 @@
   };
 </script>
 
-<div class="card {paddingMap[padding]} {className}">
-  {@render children()}
+<div class="card {className}">
+  {#if header}
+    <div class="card-header {paddingMap[padding]} border-b border-surface-700">
+      {@render header()}
+    </div>
+    <div class="{paddingMap[padding]}">
+      {@render children()}
+    </div>
+  {:else}
+    <div class="{paddingMap[padding]}">
+      {@render children()}
+    </div>
+  {/if}
 </div>
 
 <style>

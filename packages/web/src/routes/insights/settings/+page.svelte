@@ -52,7 +52,7 @@
 </script>
 
 <svelte:head>
-  <title>AI Advisor Settings | Natterbox AVS</title>
+  <title>AI Settings | Natterbox AVS</title>
 </svelte:head>
 
 <div class="space-y-6">
@@ -83,7 +83,7 @@
   <!-- Page Header -->
   <div class="flex items-center justify-between">
     <div>
-      <h1 class="text-2xl font-bold">AI Advisor Settings</h1>
+      <h1 class="text-2xl font-bold text-text-primary">AI Settings</h1>
       <p class="text-text-secondary mt-1">Configure AI-powered call analysis and transcription settings</p>
     </div>
     <Button variant="primary" onclick={handleSave} disabled={saving || data.isDemo}>
@@ -96,10 +96,10 @@
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
     <Card>
       <div class="flex items-center gap-3 mb-4">
-        <div class="p-2 bg-accent/10 rounded-base">
-          <Bot class="w-6 h-6 text-accent" />
+        <div class="p-2 bg-primary-500/10 rounded-base">
+          <Bot class="w-6 h-6 text-primary-400" />
         </div>
-        <h2 class="text-lg font-semibold">Transcription Settings</h2>
+        <h2 class="text-lg font-semibold text-text-primary">Transcription Settings</h2>
       </div>
       <div class="space-y-4">
         <div>
@@ -125,7 +125,7 @@
         </label>
         <div class="pt-2 border-t border-border">
           <div class="flex items-center gap-2">
-            <span class="text-sm text-text-secondary">AI Advisor Status:</span>
+            <span class="text-sm text-text-secondary">Insights Status:</span>
             {#if data.settings.enabled}
               <Badge variant="success">Enabled</Badge>
             {:else}
@@ -138,10 +138,10 @@
 
     <Card>
       <div class="flex items-center gap-3 mb-4">
-        <div class="p-2 bg-accent/10 rounded-base">
-          <Sliders class="w-6 h-6 text-accent" />
+        <div class="p-2 bg-primary-500/10 rounded-base">
+          <Sliders class="w-6 h-6 text-primary-400" />
         </div>
-        <h2 class="text-lg font-semibold">Access Control</h2>
+        <h2 class="text-lg font-semibold text-text-primary">Access Control</h2>
       </div>
       <div class="space-y-4">
         <label class="flex items-center gap-3 cursor-pointer">
@@ -153,7 +153,7 @@
           />
           <div>
             <span>Control by Recording Access</span>
-            <p class="text-xs text-text-secondary">Use recording access rules to control AI Advisor access</p>
+            <p class="text-xs text-text-secondary">Use recording access rules to control Insights access</p>
           </div>
         </label>
         <label class="flex items-center gap-3 cursor-pointer">
@@ -164,7 +164,7 @@
             disabled={data.isDemo}
           />
           <div>
-            <span>End Users can access all their AI Advisor Call Logs</span>
+            <span>End Users can access all their Insights Call Logs</span>
             <p class="text-xs text-text-secondary">Allow users to view insights from their own calls</p>
           </div>
         </label>

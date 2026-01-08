@@ -1,14 +1,17 @@
 import type { PageServerLoad, Actions } from './$types';
 import { hasValidCredentials, querySalesforce, updateSalesforce, deleteSalesforce } from '$lib/server/salesforce';
 import { 
-  getSapienJwt, 
-  getSapienOrganizationId, 
   savePolicyToSapien, 
   createPolicyInSapien,
   deletePolicyFromSapien,
-  canGetSapienJwt,
   SAPIEN_SCOPES 
 } from '$lib/server/sapien';
+import { 
+  canUseSapienApi,
+  getJwt,
+  getOrganizationId,
+  getSapienHost
+} from '$lib/server/gatekeeper';
 import { 
   syncEventSubscriptionsFromPolicy,
   deleteEventSubscriptionsForPolicy 
@@ -96,7 +99,7 @@ const NAMESPACE = env.SALESFORCE_PACKAGE_NAMESPACE || 'nbavs';
 // Map legacy Natterbox templateClass values to our editor node types
 function mapLegacyNodeType(templateClass?: string, nodeType?: string): string {
   const classMap: Record<string, string> = {
-    'ModFromPolicy': 'init',
+    'ModFromPolicy': 'fromPolicy',
     'ModNumber': 'inboundNumber',
     'ModNumber_Public': 'inboundNumber',
     'ModAction': 'default',
@@ -668,21 +671,22 @@ export const actions: Actions = {
 
       // ========== SAVE TO SAPIEN ==========
       // This is what actually makes the routing work - Sapien is the call routing engine
-      const sapienHost = env.SAPIEN_HOST;
       let sapienResult: { id?: number } | null = null;
       
-      if (sapienHost && canGetSapienJwt(locals)) {
+      if (canUseSapienApi(locals)) {
         try {
-          // Get Sapien JWT with routing-policies:admin scope
-          const jwt = await getSapienJwt(
+          // Get Gatekeeper JWT with routing-policies:admin scope
+          const jwt = await getJwt(
             locals.instanceUrl!,
             locals.accessToken!,
-            SAPIEN_SCOPES.ROUTING_POLICIES_ADMIN
+            SAPIEN_SCOPES.ROUTING_POLICIES_ADMIN,
+            locals.user?.id
           );
           
-          const organizationId = getSapienOrganizationId();
+          const organizationId = getOrganizationId();
+          const sapienHost = getSapienHost();
           
-          if (organizationId) {
+          if (organizationId && sapienHost) {
             console.log(`[Sapien Save] Saving policy to Sapien org ${organizationId}, natterboxId: ${natterboxId}`);
             
             if (natterboxId) {
@@ -707,7 +711,7 @@ export const actions: Actions = {
               console.log(`[Sapien Save] Created new policy with ID ${natterboxId}`);
             }
           } else {
-            console.warn('[Sapien Save] No organization ID found in JWT, skipping Sapien save');
+            console.warn('[Sapien Save] No organization ID or host found, skipping Sapien save');
           }
         } catch (e) {
           // Log but don't fail - Salesforce save is still important
@@ -748,14 +752,15 @@ export const actions: Actions = {
       // ========== SYNC EVENT SUBSCRIPTIONS ==========
       // Extract event nodes from the policy and sync subscriptions
       let eventsSynced = false;
-      if (natterboxId && canGetSapienJwt(locals)) {
+      if (natterboxId && canUseSapienApi(locals)) {
         try {
-          const jwt = await getSapienJwt(
+          const jwt = await getJwt(
             locals.instanceUrl!,
             locals.accessToken!,
-            SAPIEN_SCOPES.ROUTING_POLICIES_ADMIN
+            SAPIEN_SCOPES.ROUTING_POLICIES_ADMIN,
+            locals.user?.id
           );
-          const organizationId = getSapienOrganizationId();
+          const organizationId = getOrganizationId();
           
           if (organizationId) {
             // Extract event nodes from the policy body
@@ -848,14 +853,15 @@ export const actions: Actions = {
       // ========== DELETE EVENT SUBSCRIPTIONS ==========
       // Delete any event subscriptions associated with this policy
       let eventsDeleted = 0;
-      if (natterboxId && canGetSapienJwt(locals)) {
+      if (natterboxId && canUseSapienApi(locals)) {
         try {
-          const jwt = await getSapienJwt(
+          const jwt = await getJwt(
             locals.instanceUrl!,
             locals.accessToken!,
-            SAPIEN_SCOPES.ROUTING_POLICIES_ADMIN
+            SAPIEN_SCOPES.ROUTING_POLICIES_ADMIN,
+            locals.user?.id
           );
-          const organizationId = getSapienOrganizationId();
+          const organizationId = getOrganizationId();
           
           if (organizationId) {
             eventsDeleted = await deleteEventSubscriptionsForPolicy(jwt, organizationId, natterboxId);
@@ -869,21 +875,22 @@ export const actions: Actions = {
 
       // ========== DELETE FROM SAPIEN ==========
       // This removes the policy from the call routing engine
-      const sapienHost = env.SAPIEN_HOST;
       let deletedFromSapien = false;
       
-      if (sapienHost && canGetSapienJwt(locals) && natterboxId) {
+      if (canUseSapienApi(locals) && natterboxId) {
         try {
-          // Get Sapien JWT with routing-policies:admin scope
-          const jwt = await getSapienJwt(
+          // Get Gatekeeper JWT with routing-policies:admin scope
+          const jwt = await getJwt(
             locals.instanceUrl!,
             locals.accessToken!,
-            SAPIEN_SCOPES.ROUTING_POLICIES_ADMIN
+            SAPIEN_SCOPES.ROUTING_POLICIES_ADMIN,
+            locals.user?.id
           );
           
-          const organizationId = getSapienOrganizationId();
+          const organizationId = getOrganizationId();
+          const sapienHost = getSapienHost();
           
-          if (organizationId) {
+          if (organizationId && sapienHost) {
             console.log(`[Sapien Delete] Deleting policy ${natterboxId} from org ${organizationId}`);
             
             await deletePolicyFromSapien(
@@ -895,7 +902,7 @@ export const actions: Actions = {
             deletedFromSapien = true;
             console.log(`[Sapien Delete] Successfully deleted policy ${natterboxId}`);
           } else {
-            console.warn('[Sapien Delete] No organization ID found in JWT, skipping Sapien delete');
+            console.warn('[Sapien Delete] No organization ID or host found, skipping Sapien delete');
           }
         } catch (e) {
           // Log but continue - we still want to delete from Salesforce
@@ -905,7 +912,7 @@ export const actions: Actions = {
       } else if (!natterboxId) {
         console.warn('[Sapien Delete] No Natterbox ID found, skipping Sapien delete');
       } else {
-        console.warn('[Sapien Delete] Sapien not configured (SAPIEN_HOST missing or auth unavailable), deleting from Salesforce only');
+        console.warn('[Sapien Delete] Sapien auth not available, deleting from Salesforce only');
       }
 
       // ========== DELETE FROM SALESFORCE ==========

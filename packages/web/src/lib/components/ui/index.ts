@@ -15,4 +15,9 @@ export { default as Skeleton } from './Skeleton.svelte';
 export { default as LoadingState } from './LoadingState.svelte';
 export { default as PageLoader } from './PageLoader.svelte';
 export { default as EmptyState } from './EmptyState.svelte';
+export { default as Toggle } from './Toggle.svelte';
+export { default as Tabs } from './Tabs.svelte';
+export type { Tab } from './Tabs.svelte';
+export { default as Accordion } from './Accordion.svelte';
+export type { AccordionItem } from './Accordion.svelte';
 

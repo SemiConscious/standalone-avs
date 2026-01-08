@@ -447,7 +447,7 @@
   }
 </script>
 
-<div class="options-panel w-[400px] h-full flex flex-col">
+<div class="options-panel fixed right-0 top-16 bottom-0 w-[400px] flex flex-col z-40">
   <!-- Header -->
   <div class="panel-header p-4 flex items-start justify-between gap-3">
     <div class="flex items-start gap-3">
@@ -1581,15 +1581,15 @@
 <style>
   .options-panel {
     background-color: rgb(var(--color-surface-100));
-    border-left: 1px solid rgb(var(--color-surface-300));
     color: rgb(var(--color-surface-800));
+    box-shadow: -4px 0 20px rgba(0, 0, 0, 0.15);
   }
   
   /* Dark mode support */
   :global(.dark) .options-panel {
     background-color: rgb(var(--color-surface-800));
-    border-left-color: rgb(var(--color-surface-700));
     color: rgb(var(--color-surface-200));
+    box-shadow: -4px 0 20px rgba(0, 0, 0, 0.4);
   }
   
   .panel-header {

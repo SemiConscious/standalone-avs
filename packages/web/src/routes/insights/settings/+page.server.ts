@@ -107,12 +107,12 @@ export const load: PageServerLoad = async ({ locals }) => {
       isDemo: false,
     };
   } catch (error) {
-    console.error('Failed to fetch AI Advisor settings:', error);
+    console.error('Failed to fetch Insights settings:', error);
     return {
       settings: DEMO_SETTINGS,
       languages: AVAILABLE_LANGUAGES,
       isDemo: false,
-      error: 'Failed to load AI Advisor settings',
+      error: 'Failed to load Insights settings',
     };
   }
 };
@@ -130,7 +130,7 @@ export const actions: Actions = {
     const endUserAccess = formData.get('endUserAccess') === 'on';
 
     // In a real implementation, this would update the Settings_v1__c record
-    console.log('Saving AI Advisor settings:', {
+    console.log('Saving Insights settings:', {
       language,
       summarizationEnabled,
       accessByRecordingAccess,
