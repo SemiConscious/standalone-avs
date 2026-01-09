@@ -100,6 +100,53 @@ standalone-avs/
 | `pnpm lint` | Lint all packages |
 | `pnpm storybook` | Start Storybook component explorer |
 
+## Deployment
+
+### Vercel
+
+This project is configured for deployment to Vercel. The project uses the SvelteKit Vercel adapter and is configured as a monorepo.
+
+#### Prerequisites
+
+1. Install the Vercel CLI: `npm i -g vercel`
+2. Link your project: `vercel link`
+
+#### Environment Variables
+
+Set the following environment variables in your Vercel project settings:
+
+**Required:**
+- `SF_CLIENT_ID` - Salesforce OAuth Consumer Key
+- `SF_CLIENT_SECRET` - Salesforce OAuth Consumer Secret
+- `SF_REDIRECT_URI` - OAuth callback URL (e.g., `https://your-app.vercel.app/auth/callback`)
+
+**Optional:**
+- `SF_LOGIN_URL` - Salesforce login URL (defaults to `https://login.salesforce.com`)
+- `SALESFORCE_PACKAGE_NAMESPACE` - Salesforce package namespace (defaults to `nbavs`)
+- `SAPIEN_HOST` - Sapien API host URL
+- `SAPIEN_ORGANIZATION_ID` - Sapien organization ID
+- `TTS_HOST` - Text-to-speech service host URL
+- `PUBLIC_DEMO_MODE` - Enable demo mode (set to `true` or `1`)
+- `DEMO_MODE` - Alternative demo mode flag
+
+#### Deploy
+
+```bash
+# Deploy to production
+vercel --prod
+
+# Deploy to preview
+vercel
+```
+
+**Note for Monorepo Setup:** When linking your project to Vercel for the first time, you may need to configure the root directory in the Vercel dashboard. Set the root directory to the repository root (where `vercel.json` is located). The build command will handle building the correct package.
+
+The Vercel configuration (`vercel.json`) is set up to:
+- Build the `@avs/web` package using pnpm workspace filters
+- Use pnpm for package management
+- Use the SvelteKit framework (auto-detected)
+- Deploy to the `iad1` region (US East)
+
 ## Contributing
 
 1. Create a feature branch from `develop`

@@ -385,7 +385,7 @@
 {:else if loading}
   <div class="flex items-center justify-center h-[80vh]">
     <div class="text-center">
-      <Loader2 class="w-12 h-12 animate-spin text-accent mx-auto mb-4" />
+      <Loader2 class="w-12 h-12 animate-spin text-text-primary mx-auto mb-4" />
       <p class="text-text-secondary">Loading Routing Policy Editor...</p>
       <p class="text-xs text-text-secondary mt-2">
         Loading from {data.config.routingPolicyEditorHost}
@@ -415,7 +415,7 @@
               href="https://routing-policy-editor.natterbox.net" 
               target="_blank" 
               rel="noopener noreferrer"
-              class="inline-flex items-center gap-2 text-sm text-accent hover:underline"
+              class="inline-flex items-center gap-2 text-sm text-text-primary hover:underline"
             >
               <ExternalLink class="w-4 h-4" />
               Open editor in new tab (requires Salesforce login)

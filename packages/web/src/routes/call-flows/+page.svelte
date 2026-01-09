@@ -123,7 +123,7 @@
         <div class="flex items-start justify-between mb-4">
           <div class="flex items-center gap-3">
             <div
-              class="w-12 h-12 rounded-base bg-accent/10 flex items-center justify-center text-accent"
+              class="w-12 h-12 rounded-base bg-accent/10 flex items-center justify-center text-text-primary"
             >
               <Workflow class="w-6 h-6" />
             </div>

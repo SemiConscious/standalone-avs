@@ -1,6 +1,13 @@
+/**
+ * Platform-Aware Login Page
+ * 
+ * Initiates OAuth flow for platforms that require authentication.
+ * Platform is determined at the edge in hooks.server.ts.
+ */
+
 import { redirect, error } from '@sveltejs/kit';
-import { env } from '$env/dynamic/private';
-import type { Actions } from './$types';
+import type { Actions, PageServerLoad } from './$types';
+import { getPlatformConfig, getOAuthCredentials } from '$lib/platform';
 
 /**
  * Generate a cryptographically random code verifier for PKCE
@@ -35,26 +42,50 @@ function base64UrlEncode(buffer: Uint8Array): string {
     .replace(/=+$/, '');
 }
 
-export const actions: Actions = {
-  default: async ({ cookies, url }) => {
-    // Validate required environment variables
-    const clientId = env.SF_CLIENT_ID;
-    // Build redirect URI from current request URL for dev mode flexibility
-    const defaultRedirectUri = `${url.origin}/auth/callback`;
-    const redirectUri = env.SF_REDIRECT_URI || defaultRedirectUri;
-    const loginUrl = env.SF_LOGIN_URL || 'https://login.salesforce.com';
+export const load: PageServerLoad = async ({ locals }) => {
+  const config = getPlatformConfig(locals.platform);
+  
+  // If platform doesn't require auth, redirect to home
+  if (!config.requiresAuth) {
+    redirect(302, '/');
+  }
+  
+  // If already authenticated, redirect to home
+  if (locals.platform === 'salesforce' && locals.salesforce) {
+    redirect(302, '/');
+  }
+  
+  return {
+    platform: locals.platform,
+    platformName: config.name,
+  };
+};
 
-    if (!clientId) {
-      console.error('SF_CLIENT_ID environment variable is not set');
-      error(500, 'Salesforce OAuth is not configured. Please set SF_CLIENT_ID environment variable.');
+export const actions: Actions = {
+  default: async ({ locals, cookies, url }) => {
+    const config = getPlatformConfig(locals.platform);
+    
+    // If platform doesn't require auth, redirect to home
+    if (!config.requiresAuth) {
+      redirect(302, '/');
+    }
+    
+    // Get OAuth credentials for the platform
+    const credentials = getOAuthCredentials(config);
+    if (!credentials) {
+      console.error(`[Login] OAuth not configured for ${config.name}`);
+      error(500, `${config.name} OAuth is not configured. Please contact your administrator.`);
     }
 
     // Generate state for CSRF protection
     const state = crypto.randomUUID();
-    
+
     // Generate PKCE code verifier and challenge
     const codeVerifier = generateCodeVerifier();
     const codeChallenge = await generateCodeChallenge(codeVerifier);
+
+    // Build redirect URI from current request URL
+    const redirectUri = `${url.origin}/auth/callback`;
 
     // Store state and code verifier in cookies
     const cookieOptions = {
@@ -68,16 +99,32 @@ export const actions: Actions = {
     cookies.set('oauth_state', state, cookieOptions);
     cookies.set('oauth_code_verifier', codeVerifier, cookieOptions);
     cookies.set('oauth_redirect_uri', redirectUri, cookieOptions);
+    cookies.set('oauth_platform', locals.platform, cookieOptions);
 
-    // Build Salesforce OAuth authorization URL with PKCE
-    const authUrl = new URL(`${loginUrl}/services/oauth2/authorize`);
-    authUrl.searchParams.set('response_type', 'code');
-    authUrl.searchParams.set('client_id', clientId);
-    authUrl.searchParams.set('redirect_uri', redirectUri);
-    authUrl.searchParams.set('scope', 'api refresh_token');
-    authUrl.searchParams.set('state', state);
-    authUrl.searchParams.set('code_challenge', codeChallenge);
-    authUrl.searchParams.set('code_challenge_method', 'S256');
+    // Build platform-specific OAuth authorization URL
+    let authUrl: URL;
+
+    switch (locals.platform) {
+      case 'salesforce': {
+        authUrl = new URL(`${credentials.loginUrl}/services/oauth2/authorize`);
+        authUrl.searchParams.set('response_type', 'code');
+        authUrl.searchParams.set('client_id', credentials.clientId);
+        authUrl.searchParams.set('redirect_uri', redirectUri);
+        authUrl.searchParams.set('scope', credentials.scopes.join(' '));
+        authUrl.searchParams.set('state', state);
+        authUrl.searchParams.set('code_challenge', codeChallenge);
+        authUrl.searchParams.set('code_challenge_method', 'S256');
+        break;
+      }
+
+      case 'dynamics': {
+        // Future: Implement Dynamics OAuth
+        error(501, 'Dynamics 365 authentication is not yet implemented');
+      }
+
+      default:
+        error(400, `Platform ${locals.platform} does not support OAuth login`);
+    }
 
     redirect(302, authUrl.toString());
   },

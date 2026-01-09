@@ -1,22 +1,13 @@
-import { querySalesforce, hasValidCredentials } from '$lib/server/salesforce';
-import { 
-  getSapienJwt, 
-  getSapienConfig, 
-  canGetSapienJwt,
-  sapienRequest,
-  SAPIEN_SCOPES,
-} from '$lib/server/sapien';
-import { env } from '$env/dynamic/private';
-import type { PageServerLoad } from './$types';
+/**
+ * Call Status Page Server
+ * 
+ * Uses repository pattern for platform-agnostic data loading.
+ * Note: Sapien API integration for real-time call data remains as external service.
+ */
 
-interface SalesforceUser {
-  Id: string;
-  Name: string;
-  nbavs__Status__c: string;
-  nbavs__CTI__c: boolean;
-  nbavs__SipExtension__c: string;
-  nbavs__Id__c: number;
-}
+import { tryCreateContextAndRepositories, isSalesforceContext } from '$lib/adapters';
+import { canUseSapienApi, sapienApiRequest, getOrganizationId } from '$lib/server/gatekeeper';
+import type { PageServerLoad } from './$types';
 
 interface SapienCall {
   id?: string;
@@ -27,14 +18,18 @@ interface SapienCall {
   to?: string;
   startTime?: string;
   answerTime?: string;
-  user?: string;
   userId?: number;
-  channel?: {
+  feature?: string;
+  channels?: Array<{
     uuid?: string;
     state?: string;
     from?: string;
     to?: string;
-  };
+    userId?: number;
+    createTime?: string;
+    answerTime?: string;
+    feature?: string;
+  }>;
 }
 
 export interface ActiveCall {
@@ -44,11 +39,17 @@ export interface ActiveCall {
   direction: 'inbound' | 'outbound' | 'internal';
   fromNumber: string;
   toNumber: string;
+  fromUserId?: number;
+  toUserId?: number;
+  fromUserName?: string;
+  toUserName?: string;
   agentName?: string;
   agentExtension?: string;
   duration: number;
   queueName?: string;
+  feature?: string;
   startTime: string;
+  answerTime?: string;
 }
 
 export interface AgentStatus {
@@ -68,13 +69,25 @@ export interface CallStatusStats {
   longestWait: number;
 }
 
+export interface GroupOption {
+  id: string;
+  name: string;
+  canListenIn: boolean;
+}
+
 export interface CallStatusPageData {
   stats: CallStatusStats;
   activeCalls: ActiveCall[];
   agents: AgentStatus[];
+  groups: GroupOption[];
+  selectedGroupId: string | null;
   isDemo: boolean;
   usingSapien: boolean;
+  sapienConfigured: boolean;
+  hasCallStatusPermission: boolean;
+  canListenIn: boolean;
   sapienError?: string;
+  permissionError?: string;
   error?: string;
 }
 
@@ -96,46 +109,26 @@ const DEMO_ACTIVE_CALLS: ActiveCall[] = [
     direction: 'inbound',
     fromNumber: '+44 7700 900123',
     toNumber: '+44 20 3510 0500',
+    fromUserName: 'External Caller',
+    toUserName: 'John Smith',
     agentName: 'John Smith',
     agentExtension: '1001',
     duration: 225,
     queueName: 'Support',
+    feature: 'Queue',
     startTime: new Date(Date.now() - 225000).toISOString(),
-  },
-  {
-    id: '2',
-    uuid: 'demo-uuid-2',
-    status: 'ringing',
-    direction: 'inbound',
-    fromNumber: '+44 7700 900456',
-    toNumber: '+44 20 3510 0501',
-    agentName: 'Jane Doe',
-    agentExtension: '1002',
-    duration: 12,
-    queueName: 'Sales',
-    startTime: new Date(Date.now() - 12000).toISOString(),
-  },
-  {
-    id: '3',
-    uuid: 'demo-uuid-3',
-    status: 'on_hold',
-    direction: 'inbound',
-    fromNumber: '+44 7700 900789',
-    toNumber: '+44 20 3510 0502',
-    agentName: 'Bob Johnson',
-    agentExtension: '1003',
-    duration: 90,
-    queueName: 'Support',
-    startTime: new Date(Date.now() - 90000).toISOString(),
+    answerTime: new Date(Date.now() - 200000).toISOString(),
   },
 ];
 
 const DEMO_AGENTS: AgentStatus[] = [
   { id: 'a1', visibleId: 1001, name: 'John Smith', extension: '1001', status: 'on_call' },
-  { id: 'a2', visibleId: 1002, name: 'Jane Doe', extension: '1002', status: 'on_call' },
-  { id: 'a3', visibleId: 1003, name: 'Bob Johnson', extension: '1003', status: 'on_call' },
-  { id: 'a4', visibleId: 1004, name: 'Alice Brown', extension: '1004', status: 'available' },
-  { id: 'a5', visibleId: 1005, name: 'Charlie Green', extension: '1005', status: 'offline' },
+  { id: 'a2', visibleId: 1002, name: 'Jane Doe', extension: '1002', status: 'available' },
+];
+
+const DEMO_GROUPS: GroupOption[] = [
+  { id: 'g1', name: 'Support Queue', canListenIn: true },
+  { id: 'g2', name: 'Sales Team', canListenIn: false },
 ];
 
 function mapAgentStatus(status: string): AgentStatus['status'] {
@@ -143,7 +136,6 @@ function mapAgentStatus(status: string): AgentStatus['status'] {
   if (s.includes('available') || s.includes('ready')) return 'available';
   if (s.includes('busy') || s.includes('call')) return 'busy';
   if (s.includes('wrap')) return 'wrap_up';
-  if (s.includes('offline') || s.includes('logged out')) return 'offline';
   return 'offline';
 }
 
@@ -162,128 +154,200 @@ function mapCallDirection(direction: string): ActiveCall['direction'] {
   return 'internal';
 }
 
-export const load: PageServerLoad = async ({ locals }) => {
-  // Demo mode
-  if (env.PUBLIC_DEMO_MODE === 'true' || env.PUBLIC_DEMO_MODE === '1') {
+export const load: PageServerLoad = async ({ locals, url }) => {
+  const selectedGroupId = url.searchParams.get('group');
+  
+  const result = tryCreateContextAndRepositories(locals);
+
+  if (!result) {
     return {
       stats: DEMO_STATS,
       activeCalls: DEMO_ACTIVE_CALLS,
       agents: DEMO_AGENTS,
+      groups: DEMO_GROUPS,
+      selectedGroupId: null,
       isDemo: true,
       usingSapien: false,
+      sapienConfigured: true,
+      hasCallStatusPermission: true,
+      canListenIn: true,
     } satisfies CallStatusPageData;
   }
 
-  // Check credentials
-  if (!hasValidCredentials(locals)) {
+  const { repos, ctx, isDemo } = result;
+
+  if (isDemo || !isSalesforceContext(ctx)) {
     return {
-      stats: { activeCalls: 0, callsWaiting: 0, agentsAvailable: 0, agentsBusy: 0, avgWaitTime: 0, longestWait: 0 },
-      activeCalls: [],
-      agents: [],
-      isDemo: false,
+      stats: DEMO_STATS,
+      activeCalls: DEMO_ACTIVE_CALLS,
+      agents: DEMO_AGENTS,
+      groups: DEMO_GROUPS,
+      selectedGroupId: null,
+      isDemo: true,
       usingSapien: false,
-      error: 'Not authenticated',
+      sapienConfigured: true,
+      hasCallStatusPermission: true,
+      canListenIn: true,
     } satisfies CallStatusPageData;
   }
 
   let activeCalls: ActiveCall[] = [];
   let agents: AgentStatus[] = [];
+  let groups: GroupOption[] = [];
   let usingSapien = false;
   let sapienError: string | undefined;
+  let permissionError: string | undefined;
+  let hasCallStatusPermission = false;
+  let canListenIn = false;
 
-  // Check if Sapien API is configured
-  const sapienHost = env.SAPIEN_HOST;
-  const canUseSapien = !!sapienHost && canGetSapienJwt(locals);
+  const sapienConfigured = canUseSapienApi(locals);
+  const userIdToNameMap = new Map<number, { name: string; extension: string }>();
 
-  // Try to get real-time call data from Sapien API
-  if (canUseSapien && sapienHost) {
-    try {
-      // Get JWT with flightdeck:basic scope (same as Salesforce wallboards use)
-      const jwt = await getSapienJwt(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        SAPIEN_SCOPES.FLIGHTDECK_BASIC
-      );
-
-      // Get org ID from cached JWT
-      const sapienConfig = getSapienConfig();
-      
-      if (!sapienConfig.organizationId) {
-        console.warn('No organization ID found in JWT');
-        throw new Error('No organization ID in JWT');
-      }
-
-      console.log(`Fetching calls from Sapien: ${sapienHost}/organisation/${sapienConfig.organizationId}/call`);
-      
-      // Fetch active calls from Sapien (same endpoint as Salesforce APIController.getCalls())
-      const calls = await sapienRequest<SapienCall[]>(
-        sapienHost,
-        jwt,
-        'GET',
-        `/organisation/${sapienConfig.organizationId}/call`
-      );
-
-      if (calls && Array.isArray(calls)) {
-        usingSapien = true;
-        activeCalls = calls.map((call, index) => ({
-          id: call.id || call.uuid || String(index),
-          uuid: call.uuid || call.id || '',
-          status: mapCallState(call.state || ''),
-          direction: mapCallDirection(call.direction || ''),
-          fromNumber: call.from || call.channel?.from || '',
-          toNumber: call.to || call.channel?.to || '',
-          duration: call.startTime 
-            ? Math.floor((Date.now() - new Date(call.startTime).getTime()) / 1000)
-            : 0,
-          startTime: call.startTime || new Date().toISOString(),
-        }));
-        console.log(`Got ${activeCalls.length} active calls from Sapien`);
-      }
-    } catch (e) {
-      const errorMessage = e instanceof Error ? e.message : String(e);
-      console.error('Failed to fetch from Sapien:', errorMessage);
-      
-      // Set user-friendly error message
-      if (errorMessage.includes('403')) {
-        sapienError = 'Access denied to Sapien call data (may require Manager license)';
-      } else if (errorMessage.includes('401')) {
-        sapienError = 'Sapien authentication failed';
-      } else if (errorMessage.includes('404')) {
-        sapienError = 'Sapien call endpoint not found';
-      } else {
-        sapienError = `Sapien API error: ${errorMessage.substring(0, 100)}`;
-      }
+  // Find current user's Natterbox User using repository
+  let currentNbUser = null;
+  try {
+    const sfUserId = locals.user?.id;
+    if (sfUserId) {
+      currentNbUser = await repos.users.findBySalesforceUserId(sfUserId);
     }
+  } catch (e) {
+    console.warn('Failed to find current Natterbox user:', e);
   }
 
-  // Fetch agent statuses from Salesforce (always do this)
+  // Get groups with LiveCallStatus permission using repository
+  if (currentNbUser) {
+    try {
+      const adminGroups = await repos.groups.getAdminGroupsForUser(currentNbUser.id);
+      
+      for (const group of adminGroups) {
+        if (group.liveCallStatus) {
+          groups.push({
+            id: group.groupId,
+            name: group.groupName,
+            canListenIn: group.listenIn || false,
+          });
+          if (group.listenIn) {
+            canListenIn = true;
+          }
+        }
+      }
+
+      hasCallStatusPermission = groups.length > 0;
+
+      if (!hasCallStatusPermission) {
+        permissionError = 'You do not have permission to view live call status.';
+      }
+    } catch (e) {
+      console.warn('Failed to check group permissions:', e);
+      hasCallStatusPermission = true;
+    }
+  } else {
+    permissionError = 'Your Salesforce user is not linked to a Natterbox User.';
+  }
+
+  // Fetch agents using repository
   try {
-    const userSoql = `
-      SELECT Id, Name, nbavs__Status__c, nbavs__CTI__c, nbavs__SipExtension__c, nbavs__Id__c
-      FROM nbavs__User__c
-      WHERE nbavs__CTI__c = true AND nbavs__Enabled__c = true
-      ORDER BY Name
-      LIMIT 200
-    `;
+    const usersResult = await repos.users.findAll({ 
+      page: 1, 
+      pageSize: 200,
+      filters: { enabled: true }
+    });
 
-    const userResult = await querySalesforce<SalesforceUser>(
-      locals.instanceUrl!,
-      locals.accessToken!,
-      userSoql
-    );
-
-    agents = userResult.records.map((u) => ({
-      id: u.Id,
-      visibleId: u.nbavs__Id__c,
-      name: u.Name,
-      extension: u.nbavs__SipExtension__c || '',
-      status: mapAgentStatus(u.nbavs__Status__c),
-    }));
+    agents = usersResult.items
+      .filter(u => u.licenses.cti)
+      .map((u) => {
+        if (u.platformId) {
+          userIdToNameMap.set(u.platformId, { name: u.name, extension: u.sipExtension || '' });
+        }
+        return {
+          id: u.id,
+          visibleId: u.platformId || 0,
+          name: u.name,
+          extension: u.sipExtension || '',
+          status: mapAgentStatus(u.status),
+        };
+      });
   } catch (e) {
     console.warn('Failed to fetch user statuses:', e);
   }
 
-  // Calculate stats
+  // Fetch real-time calls from Sapien (external API - not part of repository pattern)
+  if (sapienConfigured && hasCallStatusPermission) {
+    try {
+      const organizationId = getOrganizationId();
+      if (!organizationId) throw new Error('Organization ID not configured');
+
+      const calls = await sapienApiRequest<{ data: SapienCall[] } | SapienCall[]>(
+        ctx.instanceUrl,
+        ctx.accessToken,
+        'GET',
+        `/organisation/${organizationId}/call`
+      );
+
+      const callsArray = Array.isArray(calls) ? calls : (calls?.data || []);
+
+      if (callsArray && Array.isArray(callsArray)) {
+        usingSapien = true;
+        
+        for (const call of callsArray) {
+          let fromNumber = call.from || '';
+          let toNumber = call.to || '';
+          let fromUserId: number | undefined;
+          let toUserId: number | undefined;
+          let startTime = call.startTime || new Date().toISOString();
+          let answerTime = call.answerTime;
+          let feature = call.feature || '';
+
+          if (call.channels && call.channels.length >= 1) {
+            const ch1 = call.channels[0];
+            fromNumber = ch1.from || fromNumber;
+            fromUserId = ch1.userId;
+            startTime = ch1.createTime || startTime;
+            answerTime = ch1.answerTime || answerTime;
+            feature = ch1.feature || feature;
+
+            if (call.channels.length >= 2) {
+              const ch2 = call.channels[1];
+              toNumber = ch2.to || toNumber;
+              toUserId = ch2.userId;
+            }
+          }
+
+          const activeCall: ActiveCall = {
+            id: call.id || call.uuid || String(activeCalls.length),
+            uuid: call.uuid || call.id || '',
+            status: mapCallState(call.state || ''),
+            direction: mapCallDirection(call.direction || ''),
+            fromNumber,
+            toNumber,
+            fromUserId,
+            toUserId,
+            fromUserName: fromUserId ? userIdToNameMap.get(fromUserId)?.name : undefined,
+            toUserName: toUserId ? userIdToNameMap.get(toUserId)?.name : undefined,
+            duration: startTime 
+              ? Math.floor((Date.now() - new Date(startTime).getTime()) / 1000)
+              : 0,
+            startTime,
+            answerTime,
+            feature,
+          };
+
+          if (toUserId && userIdToNameMap.has(toUserId)) {
+            const user = userIdToNameMap.get(toUserId)!;
+            activeCall.agentName = user.name;
+            activeCall.agentExtension = user.extension;
+          }
+
+          activeCalls.push(activeCall);
+        }
+      }
+    } catch (e) {
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      console.error('Failed to fetch from Sapien:', errorMessage);
+      sapienError = `Unable to fetch call data: ${errorMessage.substring(0, 80)}`;
+    }
+  }
+
   const agentsAvailable = agents.filter(a => a.status === 'available').length;
   const agentsBusy = agents.filter(a => a.status === 'busy' || a.status === 'on_call').length;
 
@@ -296,12 +360,21 @@ export const load: PageServerLoad = async ({ locals }) => {
     longestWait: 0,
   };
 
+  const selectedGroup = groups.find(g => g.id === selectedGroupId);
+  const currentCanListenIn = selectedGroup?.canListenIn ?? canListenIn;
+
   return {
     stats,
     activeCalls,
     agents,
+    groups,
+    selectedGroupId,
     isDemo: false,
     usingSapien,
+    sapienConfigured,
+    hasCallStatusPermission,
+    canListenIn: currentCanListenIn,
     sapienError,
+    permissionError,
   } satisfies CallStatusPageData;
 };

@@ -86,39 +86,39 @@ export interface SoundCategory {
 // Voice Functions
 // ============================================================
 
+// Default TTS voices (these are typically configured in Salesforce Settings_v1__c)
+const DEFAULT_VOICES: TTSVoice[] = [
+  { id: 'en-GB-Neural2-A', name: 'British English (Female)', language: 'English (UK)', languageCode: 'en-GB', gender: 'female', provider: 'google', neural: true },
+  { id: 'en-GB-Neural2-B', name: 'British English (Male)', language: 'English (UK)', languageCode: 'en-GB', gender: 'male', provider: 'google', neural: true },
+  { id: 'en-US-Neural2-A', name: 'American English (Female)', language: 'English (US)', languageCode: 'en-US', gender: 'female', provider: 'google', neural: true },
+  { id: 'en-US-Neural2-D', name: 'American English (Male)', language: 'English (US)', languageCode: 'en-US', gender: 'male', provider: 'google', neural: true },
+  { id: 'de-DE-Neural2-A', name: 'German (Female)', language: 'German', languageCode: 'de-DE', gender: 'female', provider: 'google', neural: true },
+  { id: 'de-DE-Neural2-B', name: 'German (Male)', language: 'German', languageCode: 'de-DE', gender: 'male', provider: 'google', neural: true },
+  { id: 'fr-FR-Neural2-A', name: 'French (Female)', language: 'French', languageCode: 'fr-FR', gender: 'female', provider: 'google', neural: true },
+  { id: 'fr-FR-Neural2-B', name: 'French (Male)', language: 'French', languageCode: 'fr-FR', gender: 'male', provider: 'google', neural: true },
+  { id: 'es-ES-Neural2-A', name: 'Spanish (Female)', language: 'Spanish', languageCode: 'es-ES', gender: 'female', provider: 'google', neural: true },
+  { id: 'es-ES-Neural2-B', name: 'Spanish (Male)', language: 'Spanish', languageCode: 'es-ES', gender: 'male', provider: 'google', neural: true },
+];
+
 /**
  * Get available TTS voices
  * 
- * @param ttsHost - TTS API host URL
- * @param jwt - Authorization JWT
- * @param organizationId - Organization ID
+ * Note: Voices are typically configured in Salesforce Settings_v1__c, not via Sapien API.
+ * This function returns default voices. In a full implementation, these would be
+ * fetched from Salesforce or a dedicated TTS service.
+ * 
+ * @param _sapienHost - Sapien API host URL (unused, kept for API compatibility)
+ * @param _accessToken - Sapien access token (unused, kept for API compatibility)
+ * @param _organizationId - Organization ID (unused, kept for API compatibility)
  * @returns Array of available voices
  */
 export async function getVoices(
-  ttsHost: string,
-  jwt: string,
-  organizationId: number
+  _sapienHost: string,
+  _accessToken: string,
+  _organizationId: number
 ): Promise<TTSVoice[]> {
-  const url = `${ttsHost}/v1/tts/${organizationId}/voices`;
-
-  console.log(`[TTS API] Fetching voices for org ${organizationId}`);
-
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'Authorization': `Bearer ${jwt}`,
-    },
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error(`[TTS API Error] ${response.status} - ${errorText}`);
-    throw new Error(`Failed to fetch voices: ${errorText}`);
-  }
-
-  const data = await response.json();
-  console.log(`[TTS API] Fetched ${data.length} voices`);
-  return data;
+  console.log(`[TTS API] Returning default voices (voices are configured in Salesforce)`);
+  return DEFAULT_VOICES;
 }
 
 /**
@@ -218,240 +218,304 @@ export async function previewVoice(
 // ============================================================
 
 /**
- * Get all sound files
+ * Get all sound files from Sapien API
  * 
- * @param ttsHost - TTS API host URL
- * @param jwt - Authorization JWT
+ * Uses the Sapien endpoint: GET /organisation/{orgId}/sound
+ * 
+ * @param sapienHost - Sapien API host URL
+ * @param accessToken - Sapien access token
  * @param organizationId - Organization ID
  * @returns Array of sound files
  */
 export async function getSoundFiles(
-  ttsHost: string,
-  jwt: string,
+  sapienHost: string,
+  accessToken: string,
   organizationId: number
 ): Promise<SoundFile[]> {
-  const url = `${ttsHost}/v1/sounds/${organizationId}`;
+  // Use Sapien API endpoint (same as avs-sfdx RestClient)
+  const url = `${sapienHost}/organisation/${organizationId}/sound`;
 
-  console.log(`[TTS API] Fetching sound files for org ${organizationId}`);
+  console.log(`[Sapien Sound API] Fetching sound files for org ${organizationId}`);
+  console.log(`[Sapien Sound API] URL: ${url}`);
 
   const response = await fetch(url, {
     method: 'GET',
     headers: {
-      'Authorization': `Bearer ${jwt}`,
+      'Authorization': `Bearer ${accessToken}`,
+      'Accept': 'application/json',
     },
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error(`[TTS API Error] ${response.status} - ${errorText}`);
+    console.error(`[Sapien Sound API Error] ${response.status} - ${errorText}`);
     throw new Error(`Failed to fetch sound files: ${errorText}`);
   }
 
   const data = await response.json();
-  console.log(`[TTS API] Fetched ${data.length} sound files`);
-  return data;
+  
+  // Transform Sapien response to our SoundFile format
+  // Sapien returns: { data: [...] } or just [...]
+  const sounds = Array.isArray(data) ? data : (data.data || []);
+  
+  console.log(`[Sapien Sound API] Fetched ${sounds.length} sound files`);
+  
+  return sounds.map((s: Record<string, unknown>) => ({
+    id: String(s.id || ''),
+    name: String(s.tag || s.name || ''),
+    description: String(s.description || ''),
+    type: 'upload' as const, // Sapien sounds are uploaded files
+    duration: Number(s.duration || 0),
+    size: Number(s.size || 0),
+    format: 'wav',
+    createdAt: String(s.created || new Date().toISOString()),
+    updatedAt: String(s.modified || new Date().toISOString()),
+    organizationId,
+  }));
 }
 
 /**
- * Get a specific sound file
+ * Get a specific sound file (audio data) from Sapien API
  * 
- * @param ttsHost - TTS API host URL
- * @param jwt - Authorization JWT
+ * Uses the Sapien endpoint: GET /organisation/{orgId}/sound/{id}
+ * This returns the actual audio binary data.
+ * 
+ * @param sapienHost - Sapien API host URL
+ * @param accessToken - Sapien access token
  * @param organizationId - Organization ID
  * @param soundId - Sound file ID
- * @returns Sound file details
+ * @returns Sound file audio response
  */
 export async function getSoundFile(
-  ttsHost: string,
-  jwt: string,
+  sapienHost: string,
+  accessToken: string,
   organizationId: number,
   soundId: string
-): Promise<SoundFile> {
-  const url = `${ttsHost}/v1/sounds/${organizationId}/${soundId}`;
+): Promise<Response> {
+  const url = `${sapienHost}/organisation/${organizationId}/sound/${soundId}`;
 
-  console.log(`[TTS API] Fetching sound file ${soundId}`);
+  console.log(`[Sapien Sound API] Fetching sound file ${soundId}`);
 
   const response = await fetch(url, {
     method: 'GET',
     headers: {
-      'Authorization': `Bearer ${jwt}`,
+      'Authorization': `Bearer ${accessToken}`,
+      'Accept': 'audio/*',
     },
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error(`[TTS API Error] ${response.status} - ${errorText}`);
+    console.error(`[Sapien Sound API Error] ${response.status} - ${errorText}`);
     throw new Error(`Failed to fetch sound file: ${errorText}`);
   }
 
-  return response.json();
+  return response;
 }
 
 /**
- * Create a new TTS sound file
+ * Create a new sound file via Sapien API
  * 
- * @param ttsHost - TTS API host URL
- * @param jwt - Authorization JWT
+ * Note: TTS synthesis is typically done via a separate TTS service.
+ * This function creates a sound file placeholder. For actual TTS,
+ * you would need to:
+ * 1. Call a TTS service to generate audio
+ * 2. Upload the audio via uploadSoundFile
+ * 
+ * Uses the Sapien endpoint: POST /organisation/{orgId}/sound
+ * 
+ * @param sapienHost - Sapien API host URL
+ * @param accessToken - Sapien access token
  * @param organizationId - Organization ID
- * @param name - Sound file name
- * @param text - Text to synthesize
- * @param voiceId - Voice ID
+ * @param name - Sound file name (tag)
+ * @param text - Text to synthesize (stored as description for now)
+ * @param voiceId - Voice ID (stored in description for now)
  * @param description - Optional description
  * @returns Created sound file
  */
 export async function createTTSSound(
-  ttsHost: string,
-  jwt: string,
+  sapienHost: string,
+  accessToken: string,
   organizationId: number,
   name: string,
   text: string,
   voiceId: string,
   description?: string
 ): Promise<SoundFile> {
-  const url = `${ttsHost}/v1/sounds/${organizationId}`;
-
-  console.log(`[TTS API] Creating TTS sound "${name}"`);
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${jwt}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      name,
-      description,
-      type: 'tts',
-      metadata: {
-        text,
-        voiceId,
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error(`[TTS API Error] ${response.status} - ${errorText}`);
-    throw new Error(`Failed to create sound file: ${errorText}`);
-  }
-
-  return response.json();
+  // Note: Sapien's sound API expects audio data, not TTS parameters
+  // For now, we'll throw an error indicating TTS creation is not supported
+  // In a full implementation, you would:
+  // 1. Call a TTS service (Google Cloud TTS, AWS Polly, etc.)
+  // 2. Get the audio data
+  // 3. Upload it via uploadSoundFile
+  
+  console.log(`[Sapien Sound API] TTS creation requested for "${name}" with voice ${voiceId}`);
+  console.log(`[Sapien Sound API] Text: ${text.substring(0, 100)}...`);
+  
+  throw new Error(
+    'TTS sound creation is not yet implemented. ' +
+    'Please upload an audio file directly instead. ' +
+    'TTS synthesis requires integration with a text-to-speech service.'
+  );
 }
 
 /**
- * Upload a sound file
+ * Upload a sound file to Sapien API
  * 
- * @param ttsHost - TTS API host URL
- * @param jwt - Authorization JWT
+ * Uses the Sapien endpoint: POST /organisation/{orgId}/sound
+ * The audio data is sent as base64-encoded body with custom headers.
+ * 
+ * @param sapienHost - Sapien API host URL
+ * @param accessToken - Sapien access token
  * @param organizationId - Organization ID
- * @param name - Sound file name
- * @param file - Audio file data (base64 or FormData)
+ * @param name - Sound file name (tag)
+ * @param file - Audio file data
  * @param description - Optional description
  * @returns Created sound file
  */
 export async function uploadSoundFile(
-  ttsHost: string,
-  jwt: string,
+  sapienHost: string,
+  accessToken: string,
   organizationId: number,
   name: string,
   file: File | Blob,
   description?: string
 ): Promise<SoundFile> {
-  const url = `${ttsHost}/v1/sounds/${organizationId}/upload`;
+  const url = `${sapienHost}/organisation/${organizationId}/sound`;
 
-  console.log(`[TTS API] Uploading sound file "${name}"`);
+  console.log(`[Sapien Sound API] Uploading sound file "${name}"`);
 
-  const formData = new FormData();
-  formData.append('name', name);
-  formData.append('file', file);
-  if (description) {
-    formData.append('description', description);
-  }
+  // Convert file to ArrayBuffer then to base64
+  const arrayBuffer = await file.arrayBuffer();
+  const base64Data = Buffer.from(arrayBuffer).toString('base64');
 
   const response = await fetch(url, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${jwt}`,
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'audio/wav',
+      'X-Sound-Tag': name,
+      'X-Sound-Description': description || '',
     },
-    body: formData,
+    body: base64Data,
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error(`[TTS API Error] ${response.status} - ${errorText}`);
+    console.error(`[Sapien Sound API Error] ${response.status} - ${errorText}`);
     throw new Error(`Failed to upload sound file: ${errorText}`);
   }
 
-  return response.json();
+  const data = await response.json();
+  const soundId = data.id || data.data?.id;
+
+  return {
+    id: String(soundId),
+    name,
+    description,
+    type: 'upload',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    organizationId,
+  };
 }
 
 /**
- * Update a sound file
+ * Update a sound file via Sapien API
  * 
- * @param ttsHost - TTS API host URL
- * @param jwt - Authorization JWT
+ * Uses the Sapien endpoint: PUT /organisation/{orgId}/sound/{id}
+ * Note: Sapien requires the full audio data for updates.
+ * 
+ * @param sapienHost - Sapien API host URL
+ * @param accessToken - Sapien access token
  * @param organizationId - Organization ID
  * @param soundId - Sound file ID
- * @param updates - Fields to update
+ * @param updates - Fields to update (name/description only without audio)
+ * @param audioData - Optional new audio data
  * @returns Updated sound file
  */
 export async function updateSoundFile(
-  ttsHost: string,
-  jwt: string,
+  sapienHost: string,
+  accessToken: string,
   organizationId: number,
   soundId: string,
-  updates: Partial<Pick<SoundFile, 'name' | 'description'>>
+  updates: Partial<Pick<SoundFile, 'name' | 'description'>>,
+  audioData?: ArrayBuffer
 ): Promise<SoundFile> {
-  const url = `${ttsHost}/v1/sounds/${organizationId}/${soundId}`;
+  const url = `${sapienHost}/organisation/${organizationId}/sound/${soundId}`;
 
-  console.log(`[TTS API] Updating sound file ${soundId}`);
+  console.log(`[Sapien Sound API] Updating sound file ${soundId}`);
+
+  const headers: Record<string, string> = {
+    'Authorization': `Bearer ${accessToken}`,
+  };
+
+  if (updates.name) {
+    headers['X-Sound-Tag'] = updates.name;
+  }
+  if (updates.description) {
+    headers['X-Sound-Description'] = updates.description;
+  }
+
+  let body: string | undefined;
+  if (audioData) {
+    body = Buffer.from(audioData).toString('base64');
+  }
 
   const response = await fetch(url, {
-    method: 'PATCH',
-    headers: {
-      'Authorization': `Bearer ${jwt}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(updates),
+    method: 'PUT',
+    headers,
+    body,
   });
 
-  if (!response.ok) {
+  if (!response.ok && response.status !== 204) {
     const errorText = await response.text();
-    console.error(`[TTS API Error] ${response.status} - ${errorText}`);
+    console.error(`[Sapien Sound API Error] ${response.status} - ${errorText}`);
     throw new Error(`Failed to update sound file: ${errorText}`);
   }
 
-  return response.json();
+  return {
+    id: soundId,
+    name: updates.name || '',
+    description: updates.description,
+    type: 'upload',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    organizationId,
+  };
 }
 
 /**
- * Delete a sound file
+ * Delete a sound file from Sapien API
  * 
- * @param ttsHost - TTS API host URL
- * @param jwt - Authorization JWT
+ * Uses the Sapien endpoint: DELETE /organisation/{orgId}/sound/{id}
+ * 
+ * @param sapienHost - Sapien API host URL
+ * @param accessToken - Sapien access token
  * @param organizationId - Organization ID
  * @param soundId - Sound file ID
  */
 export async function deleteSoundFile(
-  ttsHost: string,
-  jwt: string,
+  sapienHost: string,
+  accessToken: string,
   organizationId: number,
   soundId: string
 ): Promise<void> {
-  const url = `${ttsHost}/v1/sounds/${organizationId}/${soundId}`;
+  const url = `${sapienHost}/organisation/${organizationId}/sound/${soundId}`;
 
-  console.log(`[TTS API] Deleting sound file ${soundId}`);
+  console.log(`[Sapien Sound API] Deleting sound file ${soundId}`);
 
   const response = await fetch(url, {
     method: 'DELETE',
     headers: {
-      'Authorization': `Bearer ${jwt}`,
+      'Authorization': `Bearer ${accessToken}`,
     },
   });
 
-  if (!response.ok) {
+  // 204 No Content or 200 OK are both success
+  if (!response.ok && response.status !== 204) {
     const errorText = await response.text();
-    console.error(`[TTS API Error] ${response.status} - ${errorText}`);
+    console.error(`[Sapien Sound API Error] ${response.status} - ${errorText}`);
     throw new Error(`Failed to delete sound file: ${errorText}`);
   }
 }

@@ -1,11 +1,13 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import type { HTMLButtonAttributes } from 'svelte/elements';
+  import type { HTMLButtonAttributes, HTMLAnchorAttributes } from 'svelte/elements';
 
   interface Props extends Omit<HTMLButtonAttributes, 'class'> {
     variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
     size?: 'sm' | 'md' | 'lg';
     class?: string;
+    href?: string;
+    loading?: boolean;
     children: Snippet;
   }
 
@@ -15,19 +17,36 @@
     disabled = false,
     type = 'button',
     class: className = '',
+    href,
+    loading = false,
     children,
     ...restProps
   }: Props = $props();
+
+  const classes = $derived(`btn btn-${variant} btn-size-${size} ${className}`);
 </script>
 
-<button
-  {type}
-  {disabled}
-  class="btn btn-{variant} btn-size-{size} {className}"
-  {...restProps}
->
-  {@render children()}
-</button>
+{#if href && !disabled}
+  <a
+    {href}
+    class={classes}
+    {...restProps as HTMLAnchorAttributes}
+  >
+    {@render children()}
+  </a>
+{:else}
+  <button
+    {type}
+    disabled={disabled || loading}
+    class={classes}
+    {...restProps}
+  >
+    {#if loading}
+      <span class="loading-spinner"></span>
+    {/if}
+    {@render children()}
+  </button>
+{/if}
 
 <style>
   .btn {
@@ -40,9 +59,10 @@
     cursor: pointer;
     transition: all 0.2s ease;
     border: none;
+    text-decoration: none;
   }
 
-  .btn:disabled {
+  button.btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
@@ -69,7 +89,7 @@
     color: white;
   }
 
-  .btn-primary:hover:not(:disabled) {
+  .btn-primary:hover {
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(var(--color-primary-500), 0.35);
   }
@@ -80,7 +100,7 @@
     color: rgb(var(--color-surface-200));
   }
 
-  .btn-secondary:hover:not(:disabled) {
+  .btn-secondary:hover {
     background: rgb(var(--color-surface-600));
     border-color: rgb(var(--color-surface-500));
   }
@@ -90,7 +110,7 @@
     color: rgb(var(--color-surface-300));
   }
 
-  .btn-ghost:hover:not(:disabled) {
+  .btn-ghost:hover {
     background: rgb(var(--color-surface-700));
     color: rgb(var(--color-surface-100));
   }
@@ -100,7 +120,23 @@
     color: rgb(248, 113, 113);
   }
 
-  .btn-danger:hover:not(:disabled) {
+  .btn-danger:hover {
     background: rgba(239, 68, 68, 0.3);
+  }
+
+  /* Loading spinner */
+  .loading-spinner {
+    width: 1em;
+    height: 1em;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>

@@ -1,23 +1,14 @@
-import { querySalesforce, hasValidCredentials } from '$lib/server/salesforce';
-import { env } from '$env/dynamic/private';
+/**
+ * Messaging Page Server
+ * 
+ * Uses repository pattern for platform-agnostic data loading.
+ */
+
 import type { PageServerLoad } from './$types';
+import { tryCreateContextAndRepositories, isSalesforceContext } from '$lib/adapters';
+import { getLicenseFromSapien, fetchApiSettings } from '$lib/server/gatekeeper';
 
-interface SalesforcePhoneNumber {
-  Id: string;
-  Name: string;
-  nbavs__Number__c: string;
-  nbavs__Capability_SMS__c: boolean;
-  nbavs__Capability_MMS__c: boolean;
-}
-
-interface SalesforceSettings {
-  Id: string;
-  nbavs__SMSEnabled__c: boolean;
-  nbavs__WhatsAppEnabled__c: boolean;
-  nbavs__WhatsAppBusinessId__c: string;
-}
-
-export interface MessagingStats {
+interface MessagingStats {
   smsSentToday: number;
   smsReceivedToday: number;
   whatsappSentToday: number;
@@ -25,7 +16,7 @@ export interface MessagingStats {
   activeNumbers: number;
 }
 
-export interface MessagingPhoneNumber {
+interface MessagingPhoneNumber {
   id: string;
   name: string;
   number: string;
@@ -33,7 +24,7 @@ export interface MessagingPhoneNumber {
   mmsEnabled: boolean;
 }
 
-export interface MessagingConfig {
+interface MessagingConfig {
   smsEnabled: boolean;
   whatsappEnabled: boolean;
   whatsappConfigured: boolean;
@@ -49,114 +40,92 @@ export interface MessagingPageData {
 
 // Demo data
 const DEMO_STATS: MessagingStats = {
-  smsSentToday: 1234,
-  smsReceivedToday: 856,
-  whatsappSentToday: 456,
-  whatsappReceivedToday: 312,
-  activeNumbers: 8,
+  smsSentToday: 245,
+  smsReceivedToday: 189,
+  whatsappSentToday: 78,
+  whatsappReceivedToday: 56,
+  activeNumbers: 12,
 };
 
 const DEMO_PHONE_NUMBERS: MessagingPhoneNumber[] = [
-  { id: '1', name: 'Main SMS Line', number: '+44 20 3510 0500', smsEnabled: true, mmsEnabled: true },
-  { id: '2', name: 'Support SMS', number: '+44 20 3510 0501', smsEnabled: true, mmsEnabled: false },
-  { id: '3', name: 'Sales SMS', number: '+44 20 3510 0502', smsEnabled: true, mmsEnabled: true },
+  { id: '1', name: 'Main Support', number: '+442031234567', smsEnabled: true, mmsEnabled: false },
+  { id: '2', name: 'Sales Team', number: '+442087654321', smsEnabled: true, mmsEnabled: true },
+  { id: '3', name: 'Customer Service', number: '+447700900123', smsEnabled: true, mmsEnabled: true },
 ];
 
-const DEMO_CONFIG: MessagingConfig = {
-  smsEnabled: true,
-  whatsappEnabled: false,
-  whatsappConfigured: false,
-};
-
 export const load: PageServerLoad = async ({ locals }) => {
-  // Demo mode
-  if (env.PUBLIC_DEMO_MODE === 'true' || env.PUBLIC_DEMO_MODE === '1') {
+  const result = tryCreateContextAndRepositories(locals);
+
+  if (!result) {
     return {
       stats: DEMO_STATS,
       phoneNumbers: DEMO_PHONE_NUMBERS,
-      config: DEMO_CONFIG,
+      config: { smsEnabled: true, whatsappEnabled: true, whatsappConfigured: true },
       isDemo: true,
     } satisfies MessagingPageData;
   }
 
-  // Check credentials
-  if (!hasValidCredentials(locals)) {
+  const { repos, isDemo } = result;
+
+  if (isDemo) {
     return {
-      stats: { smsSentToday: 0, smsReceivedToday: 0, whatsappSentToday: 0, whatsappReceivedToday: 0, activeNumbers: 0 },
-      phoneNumbers: [],
-      config: { smsEnabled: false, whatsappEnabled: false, whatsappConfigured: false },
-      isDemo: false,
-      error: 'Not authenticated',
+      stats: DEMO_STATS,
+      phoneNumbers: DEMO_PHONE_NUMBERS,
+      config: { smsEnabled: true, whatsappEnabled: true, whatsappConfigured: true },
+      isDemo: true,
     } satisfies MessagingPageData;
   }
 
   try {
     // Fetch phone numbers with SMS capability
-    const phoneNumberSoql = `
-      SELECT Id, Name, nbavs__Number__c, nbavs__Capability_SMS__c, nbavs__Capability_MMS__c
-      FROM nbavs__PhoneNumber__c
-      WHERE nbavs__Capability_SMS__c = true
-      ORDER BY Name
-      LIMIT 100
-    `;
-
     let phoneNumbers: MessagingPhoneNumber[] = [];
     try {
-      const result = await querySalesforce<SalesforcePhoneNumber>(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        phoneNumberSoql
-      );
-
-      phoneNumbers = result.records.map((pn) => ({
-        id: pn.Id,
-        name: pn.Name,
-        number: pn.nbavs__Number__c || '',
-        smsEnabled: pn.nbavs__Capability_SMS__c || false,
-        mmsEnabled: pn.nbavs__Capability_MMS__c || false,
-      }));
+      const phoneResult = await repos.phoneNumbers.findAll({ page: 1, pageSize: 1000 });
+      phoneNumbers = phoneResult.items
+        .filter(pn => pn.capabilities?.sms)
+        .map(pn => ({
+          id: pn.id,
+          name: pn.name,
+          number: pn.number,
+          smsEnabled: pn.capabilities?.sms || false,
+          mmsEnabled: pn.capabilities?.mms || false,
+        }));
     } catch (e) {
-      console.warn('Failed to fetch messaging phone numbers:', e);
+      console.warn('Failed to fetch SMS phone numbers:', e);
     }
 
-    // Fetch messaging settings
-    let config: MessagingConfig = { smsEnabled: false, whatsappEnabled: false, whatsappConfigured: false };
-    try {
-      const settingsSoql = `
-        SELECT Id, nbavs__SMSEnabled__c, nbavs__WhatsAppEnabled__c, nbavs__WhatsAppBusinessId__c
-        FROM nbavs__Settings_v1__c
-        LIMIT 1
-      `;
-
-      const settingsResult = await querySalesforce<SalesforceSettings>(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        settingsSoql
-      );
-
-      if (settingsResult.records.length > 0) {
-        const s = settingsResult.records[0];
-        config = {
-          smsEnabled: s.nbavs__SMSEnabled__c || false,
-          whatsappEnabled: s.nbavs__WhatsAppEnabled__c || false,
-          whatsappConfigured: !!s.nbavs__WhatsAppBusinessId__c,
-        };
-      }
-    } catch (e) {
-      console.warn('Failed to fetch messaging settings:', e);
-    }
-
-    // Note: Actual message counts would need to come from the Sapien API
-    const stats: MessagingStats = {
-      smsSentToday: 0,
-      smsReceivedToday: 0,
-      whatsappSentToday: 0,
-      whatsappReceivedToday: 0,
-      activeNumbers: phoneNumbers.length,
+    // Fetch messaging settings from license (Settings_v1__c is a protected custom setting)
+    let config: MessagingConfig = {
+      smsEnabled: false,
+      whatsappEnabled: false,
+      whatsappConfigured: false,
     };
 
+    try {
+      // Get SMS/WhatsApp enabled from license via Sapien
+      if (isSalesforceContext(result.ctx)) {
+        await fetchApiSettings(result.ctx.instanceUrl, result.ctx.accessToken);
+        const license = await getLicenseFromSapien(result.ctx.instanceUrl, result.ctx.accessToken);
+        if (license) {
+          config = {
+            smsEnabled: Boolean(license.SMS__c),
+            whatsappEnabled: Boolean(license.WhatsApp__c),
+            whatsappConfigured: Boolean(license.WhatsApp__c), // Assume configured if licensed
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch messaging settings from license:', e);
+    }
+
     return {
-      stats,
+      stats: {
+        smsSentToday: 0,
+        smsReceivedToday: 0,
+        whatsappSentToday: 0,
+        whatsappReceivedToday: 0,
+        activeNumbers: phoneNumbers.length,
+      },
       phoneNumbers,
       config,
       isDemo: false,
@@ -172,4 +141,3 @@ export const load: PageServerLoad = async ({ locals }) => {
     } satisfies MessagingPageData;
   }
 };
-

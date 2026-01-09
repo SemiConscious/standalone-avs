@@ -15,6 +15,8 @@
     X,
     MapPin,
     Clock,
+    Edit,
+    Trash2,
   } from 'lucide-svelte';
   import type { Device } from './+page.server';
 
@@ -38,7 +40,7 @@
 
   // Column definitions
   let columns = $state<Column[]>([
-    { key: 'actions', label: 'Action', width: '120px' },
+    { key: 'actions', label: '', width: '80px' },
     { key: 'extension', label: 'Extension', sortable: true },
     { key: 'location', label: 'Location', sortable: true },
     { key: 'description', label: 'Description' },
@@ -264,9 +266,9 @@
 
       {#snippet cell(column, row)}
         {#if column.key === 'actions'}
-          <div class="flex items-center gap-1">
-            <a href="/devices/{row.id}/edit" class="text-accent hover:underline text-sm">
-              Edit
+          <div class="flex items-center justify-end gap-1">
+            <a href="/devices/{row.id}" class="text-text-primary hover:text-primary-300" title="Edit Device">
+              <Edit class="w-3.5 h-3.5" />
             </a>
             {#if row.type !== 'Web Phone'}
               <span class="text-text-secondary">|</span>
@@ -276,7 +278,7 @@
                     e.stopPropagation();
                     handleDelete(String(row.id));
                   }}
-                  class="text-error hover:underline text-sm"
+                  class="text-error hover:text-error/80 text-sm"
                 >
                   Confirm
                 </button>
@@ -285,7 +287,7 @@
                     e.stopPropagation();
                     showDeleteConfirm = null;
                   }}
-                  class="text-text-secondary hover:underline text-sm"
+                  class="text-text-secondary hover:text-text-primary text-sm"
                 >
                   Cancel
                 </button>
@@ -295,15 +297,16 @@
                     e.stopPropagation();
                     showDeleteConfirm = String(row.id);
                   }}
-                  class="text-accent hover:underline text-sm"
+                  class="text-text-primary hover:text-primary-300"
+                  title="Delete Device"
                 >
-                  Del
+                  <Trash2 class="w-3.5 h-3.5" />
                 </button>
               {/if}
             {/if}
           </div>
         {:else if column.key === 'extension'}
-          <a href="/devices/{row.id}" class="text-accent hover:underline font-mono">
+          <a href="/devices/{row.id}" class="text-text-primary hover:text-primary-300 hover:underline font-mono">
             {row.extension || '—'}
           </a>
         {:else if column.key === 'location'}
@@ -320,8 +323,8 @@
         {:else if column.key === 'assignedUserName'}
           {#if row.assignedUserName}
             <a
-              href="/users?id={row.assignedUserId}"
-              class="text-accent hover:underline flex items-center gap-1"
+              href="/users/{row.assignedUserId}"
+              class="text-text-primary hover:text-primary-300 hover:underline flex items-center gap-1"
             >
               <User class="w-3 h-3" />
               {row.assignedUserName}

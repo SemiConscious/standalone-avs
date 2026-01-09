@@ -131,7 +131,7 @@
               <svelte:component this={stat.icon} class="w-5 h-5" />
             </div>
           </div>
-          <div class="mt-3 flex items-center text-sm text-surface-400 group-hover:text-primary-400 transition-colors">
+          <div class="mt-3 flex items-center text-sm text-surface-400 group-hover:text-text-primary transition-colors">
             <span>View all</span>
             <ArrowRight class="w-4 h-4 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
           </div>
@@ -297,5 +297,5 @@
   .text-surface-100 { color: rgb(var(--color-surface-100)); }
   .text-surface-400 { color: rgb(var(--color-surface-400)); }
   .text-surface-500 { color: rgb(var(--color-surface-500)); }
-  .text-primary-400 { color: rgb(var(--color-primary-400)); }
+  .text-text-primary { color: rgb(var(--color-primary-400)); }
 </style>

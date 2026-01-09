@@ -44,7 +44,7 @@
   <!-- Header -->
   <div class="flex items-center gap-3">
     <span class="text-text-secondary text-sm">User Home</span>
-    <h1 class="text-xl font-semibold">Natterbox App</h1>
+    <h1 class="text-xl font-semibold text-text-primary">Natterbox App</h1>
   </div>
 
   <!-- Demo Mode Banner -->
@@ -72,12 +72,12 @@
           <div class="p-4 border-b border-border">
             <div class="flex items-start justify-between">
               <div class="flex items-center gap-3">
-                <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                  <User class="w-5 h-5 text-blue-600" />
+                <div class="w-10 h-10 bg-primary-500/20 rounded-lg flex items-center justify-center">
+                  <User class="w-5 h-5 text-text-primary" />
                 </div>
                 <div>
                   <p class="text-xs text-text-secondary uppercase tracking-wide">MY DETAILS</p>
-                  <h2 class="text-lg font-semibold text-accent">{profileData.user.name}</h2>
+                  <h2 class="text-lg font-semibold text-text-primary">{profileData.user.name}</h2>
                 </div>
               </div>
               
@@ -99,19 +99,29 @@
           <div class="p-4">
             <div class="grid grid-cols-2 gap-y-3 text-sm">
               <div>
-                <span class="text-accent font-medium">Mobile Number</span>
+                <span class="text-text-primary font-medium">Mobile Number</span>
               </div>
-              <div>{profileData.user.mobilePhone || '—'}</div>
+              <div class="text-text-primary">{profileData.user.mobilePhone || '—'}</div>
 
               <div>
-                <span class="text-accent font-medium">Extension Number</span>
+                <span class="text-text-primary font-medium">Extension Number</span>
               </div>
-              <div>{profileData.user.extension || '—'}</div>
+              <div class="text-text-primary">{profileData.user.extension || '—'}</div>
 
               <div>
-                <span class="text-accent font-medium">My DDI(s)</span>
+                <span class="text-text-primary font-medium">Home Country</span>
               </div>
-              <div>{profileData.ddis.join(' ') || '—'}</div>
+              <div class="text-text-primary">{profileData.user.homeCountry || '—'}</div>
+
+              <div>
+                <span class="text-text-primary font-medium">Default Voice</span>
+              </div>
+              <div class="text-text-primary">{profileData.user.defaultVoice || '—'}</div>
+
+              <div>
+                <span class="text-text-primary font-medium">My DDI(s)</span>
+              </div>
+              <div class="text-text-primary">{profileData.ddis.join(' ') || '—'}</div>
             </div>
           </div>
         </Card>
@@ -133,10 +143,10 @@
             <p class="text-sm text-text-secondary mb-3">My active inbound numbers</p>
             {#if profileData.activeInboundNumbers.length > 0}
               <div class="space-y-1">
-                {#each profileData.activeInboundNumbers as number, i}
+                {#each profileData.activeInboundNumbers as item}
                   <div class="flex items-center gap-2 text-sm">
-                    <input type="checkbox" checked disabled class="rounded border-border" />
-                    <span class="text-accent">{number}</span>
+                    <input type="checkbox" checked={item.enabled} disabled class="rounded border-border" />
+                    <span class="text-text-primary">{item.number}</span>
                   </div>
                 {/each}
               </div>
@@ -156,7 +166,7 @@
               <div>
                 <p class="text-xs text-text-secondary uppercase tracking-wide">MY RECENT CALLS</p>
                 {#if profileData.lastCallDate}
-                  <p class="text-accent font-medium">Last Call was {profileData.lastCallDate}</p>
+                  <p class="text-text-primary font-medium">Last Call was {profileData.lastCallDate}</p>
                 {/if}
               </div>
             </div>
@@ -178,11 +188,11 @@
                   <tbody>
                     {#each profileData.recentCalls as call}
                       <tr class="border-b border-border/50">
-                        <td class="py-2 text-accent">{call.dateTime}</td>
-                        <td class="py-2">{call.fromNumber}</td>
-                        <td class="py-2">{call.toNumber}</td>
-                        <td class="py-2">{call.duration}</td>
-                        <td class="py-2">{call.direction}</td>
+                        <td class="py-2 text-text-primary">{call.dateTime}</td>
+                        <td class="py-2 text-text-primary">{call.fromNumber}</td>
+                        <td class="py-2 text-text-primary">{call.toNumber}</td>
+                        <td class="py-2 text-text-primary">{call.duration}</td>
+                        <td class="py-2 text-text-primary">{call.direction}</td>
                       </tr>
                     {/each}
                   </tbody>
@@ -215,7 +225,7 @@
               <div class="space-y-2">
                 {#each profileData.groups as group}
                   <div class="text-sm">
-                    <span class="text-accent">{group.name}</span>
+                    <span class="text-text-primary">{group.name}</span>
                     {#if group.isPrimary}
                       <Badge variant="accent" size="sm" class="ml-2">Primary</Badge>
                     {/if}
@@ -258,16 +268,16 @@
                       <tr class="border-b border-border/50">
                         <td class="py-2">
                           {#if vm.canPlay}
-                            <button class="text-accent hover:text-accent-hover">
+                            <button class="text-text-primary hover:text-text-primary-hover">
                               <Play class="w-4 h-4" />
                             </button>
                           {:else}
                             <span class="text-text-secondary">—</span>
                           {/if}
                         </td>
-                        <td class="py-2">{vm.dateTime}</td>
-                        <td class="py-2">{vm.dialledNumber}</td>
-                        <td class="py-2">{vm.duration}</td>
+                        <td class="py-2 text-text-primary">{vm.dateTime}</td>
+                        <td class="py-2 text-text-primary">{vm.dialledNumber}</td>
+                        <td class="py-2 text-text-primary">{vm.duration}</td>
                       </tr>
                     {/each}
                   </tbody>

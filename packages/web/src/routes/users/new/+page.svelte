@@ -1,57 +1,40 @@
 <script lang="ts">
+  import { enhance } from '$app/forms';
   import { Card, Button, Input, Select } from '$lib/components/ui';
   import { toasts } from '$lib/stores/toast';
   import { ArrowLeft, Save } from 'lucide-svelte';
+  import type { ActionData } from './$types';
+
+  interface Props {
+    form?: ActionData;
+  }
+
+  let { form }: Props = $props();
 
   let firstName = $state('');
   let lastName = $state('');
   let email = $state('');
   let username = $state('');
   let extension = $state('');
-  let directDial = $state('');
-  let timezone = $state('America/New_York');
-  let licenseType = $state('standard');
-  let groupIds = $state<string[]>([]);
+  let mobilePhone = $state('');
+  let permissionLevel = $state('Basic');
+  let enabled = $state(true);
   let isSubmitting = $state(false);
 
-  const timezoneOptions = [
-    { value: 'America/New_York', label: 'Eastern Time' },
-    { value: 'America/Chicago', label: 'Central Time' },
-    { value: 'America/Denver', label: 'Mountain Time' },
-    { value: 'America/Los_Angeles', label: 'Pacific Time' },
-    { value: 'Europe/London', label: 'London' },
-    { value: 'Europe/Paris', label: 'Paris' },
+  const permissionLevelOptions = [
+    { value: 'Basic', label: 'Basic' },
+    { value: 'Standard', label: 'Standard' },
+    { value: 'Team Leader', label: 'Team Leader' },
+    { value: 'Admin', label: 'Admin' },
+    { value: 'Super Admin', label: 'Super Admin' },
   ];
-
-  const licenseOptions = [
-    { value: 'basic', label: 'Basic' },
-    { value: 'standard', label: 'Standard' },
-    { value: 'professional', label: 'Professional' },
-    { value: 'enterprise', label: 'Enterprise' },
-  ];
-
-  async function handleSubmit(event: Event) {
-    event.preventDefault();
-    isSubmitting = true;
-
-    try {
-      // API call would go here
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      toasts.success('User created successfully');
-      // Navigate back to users list
-    } catch (error) {
-      toasts.error('Failed to create user', 'Please try again later');
-    } finally {
-      isSubmitting = false;
-    }
-  }
 </script>
 
 <svelte:head>
   <title>Create User | Natterbox AVS</title>
 </svelte:head>
 
-<div class="max-w-2xl mx-auto space-y-6">
+<div class="max-w-4xl mx-auto space-y-4">
   <!-- Header -->
   <div class="flex items-center gap-4">
     <a
@@ -62,132 +45,129 @@
       <ArrowLeft class="w-5 h-5" />
     </a>
     <div>
-      <h1 class="text-2xl font-bold">Create User</h1>
-      <p class="text-text-secondary mt-1">Add a new user to your organization</p>
+      <h1 class="text-xl font-bold text-text-primary">Create User</h1>
+      <p class="text-sm text-text-secondary">Add a new user to your organization</p>
     </div>
   </div>
 
-  <form onsubmit={handleSubmit}>
-    <!-- Personal Information -->
-    <Card class="mb-6">
-      {#snippet header()}
-        <h2 class="font-semibold">Personal Information</h2>
-      {/snippet}
+  {#if form?.error}
+    <div class="bg-error/10 border border-error/20 text-error rounded-base p-3 flex items-center gap-3 text-sm">
+      <span>{form.error}</span>
+    </div>
+  {/if}
 
-      <div class="space-y-4">
-        <div class="grid grid-cols-2 gap-4">
+  <form
+    method="POST"
+    action="?/create"
+    use:enhance={() => {
+      isSubmitting = true;
+      return async ({ result, update }) => {
+        await update();
+        isSubmitting = false;
+        if (result.type === 'failure') {
+          toasts.error(result.data?.error || 'Failed to create user');
+        }
+      };
+    }}
+  >
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <!-- Personal Information -->
+      <Card>
+        {#snippet header()}
+          <h2 class="font-semibold text-text-primary text-sm">Personal Information</h2>
+        {/snippet}
+
+        <div class="space-y-3">
+          <div class="grid grid-cols-2 gap-3">
+            <Input
+              label="First Name"
+              name="firstName"
+              bind:value={firstName}
+              required
+              placeholder="John"
+            />
+            <Input
+              label="Last Name"
+              name="lastName"
+              bind:value={lastName}
+              required
+              placeholder="Smith"
+            />
+          </div>
+
           <Input
-            label="First Name"
-            bind:value={firstName}
-            required
-            placeholder="John"
+            label="Email"
+            name="email"
+            type="email"
+            bind:value={email}
+            placeholder="john.smith@example.com"
+            hint="Optional if username provided"
           />
+
           <Input
-            label="Last Name"
-            bind:value={lastName}
-            required
-            placeholder="Smith"
+            label="Username"
+            name="username"
+            bind:value={username}
+            placeholder="jsmith"
+            hint="Optional if email provided"
           />
         </div>
+      </Card>
 
-        <Input
-          label="Email"
-          type="email"
-          bind:value={email}
-          required
-          placeholder="john.smith@example.com"
-        />
+      <!-- Phone & Settings -->
+      <Card>
+        {#snippet header()}
+          <h2 class="font-semibold text-text-primary text-sm">Phone & Settings</h2>
+        {/snippet}
 
-        <Input
-          label="Username"
-          bind:value={username}
-          required
-          placeholder="jsmith"
-          hint="Used for login and system identification"
-        />
-      </div>
-    </Card>
+        <div class="space-y-3">
+          <div class="grid grid-cols-2 gap-3">
+            <Input
+              label="Extension"
+              name="extension"
+              bind:value={extension}
+              placeholder="1001"
+              hint="1000-9999"
+            />
 
-    <!-- Phone Settings -->
-    <Card class="mb-6">
-      {#snippet header()}
-        <h2 class="font-semibold">Phone Settings</h2>
-      {/snippet}
+            <Input
+              label="Mobile Phone"
+              name="mobilePhone"
+              type="tel"
+              bind:value={mobilePhone}
+              placeholder="+44 7xxx xxxxxx"
+            />
+          </div>
 
-      <div class="space-y-4">
-        <div class="grid grid-cols-2 gap-4">
-          <Input
-            label="Extension"
-            bind:value={extension}
-            placeholder="1001"
-            hint="Internal extension number"
+          <Select
+            label="Permission Level"
+            name="permissionLevel"
+            bind:value={permissionLevel}
+            options={permissionLevelOptions}
           />
-          <Input
-            label="Direct Dial"
-            bind:value={directDial}
-            placeholder="+1 (415) 555-1234"
-            hint="Direct inward dial number"
-          />
-        </div>
 
-        <Select
-          label="Timezone"
-          bind:value={timezone}
-          options={timezoneOptions}
-        />
-      </div>
-    </Card>
-
-    <!-- License & Groups -->
-    <Card class="mb-6">
-      {#snippet header()}
-        <h2 class="font-semibold">License & Groups</h2>
-      {/snippet}
-
-      <div class="space-y-4">
-        <Select
-          label="License Type"
-          bind:value={licenseType}
-          options={licenseOptions}
-          hint="Determines available features"
-        />
-
-        <div>
-          <label class="block text-sm font-medium text-text-primary mb-1.5">Groups</label>
-          <div class="space-y-2">
+          <div>
             <label class="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
-                class="w-4 h-4 rounded border-border text-accent focus:ring-accent"
+                name="enabled"
+                bind:checked={enabled}
+                class="w-4 h-4 rounded border-border text-text-primary focus:ring-accent"
               />
-              <span>Sales Team</span>
+              <span class="text-sm font-medium text-text-primary">User Enabled</span>
             </label>
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                class="w-4 h-4 rounded border-border text-accent focus:ring-accent"
-              />
-              <span>Support Team</span>
-            </label>
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                class="w-4 h-4 rounded border-border text-accent focus:ring-accent"
-              />
-              <span>Technical Support</span>
-            </label>
+            <input type="hidden" name="enabled" value={enabled ? 'true' : 'false'} />
+            <p class="text-xs text-text-secondary mt-1">Allow this user to access the system</p>
           </div>
         </div>
-      </div>
-    </Card>
+      </Card>
+    </div>
 
     <!-- Actions -->
-    <div class="flex items-center justify-end gap-4">
-      <a href="/users">
-        <Button variant="secondary" type="button">Cancel</Button>
-      </a>
-      <Button variant="primary" type="submit" loading={isSubmitting}>
-        <Save class="w-4 h-4 mr-2" />
+    <div class="flex items-center justify-end gap-3 mt-4">
+      <Button variant="secondary" href="/users" size="sm">Cancel</Button>
+      <Button variant="primary" type="submit" loading={isSubmitting} disabled={isSubmitting} size="sm">
+        <Save class="w-4 h-4 mr-1.5" />
         Create User
       </Button>
     </div>

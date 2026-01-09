@@ -199,13 +199,13 @@
 
 <div class="flex flex-col min-h-0 h-full bg-surface-800 rounded-lg border border-surface-700">
   <!-- Search and toolbar -->
-  <div class="flex items-center gap-4 p-4 border-b border-surface-700">
-    <!-- Left section: Refresh + Search -->
-    <div class="flex items-center gap-2">
+  <div class="flex items-center gap-3 p-3 border-b border-surface-700">
+    <!-- Left section: Refresh + Search + Custom toolbar -->
+    <div class="flex items-center gap-2 flex-1">
       {#if onRefresh}
         <button
           onclick={onRefresh}
-          class="flex items-center justify-center p-2 text-sm bg-surface-700 border border-surface-600 rounded-lg text-surface-200 hover:bg-surface-600 transition-colors"
+          class="flex items-center justify-center p-1.5 text-sm bg-surface-700 border border-surface-600 rounded-lg text-surface-200 hover:bg-surface-600 transition-colors"
           aria-label="Refresh"
         >
           <RefreshCw class="w-4 h-4" />
@@ -213,20 +213,17 @@
       {/if}
 
       {#if searchable}
-        <div class="relative w-80">
+        <div class="relative w-64">
           <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" />
           <input
             type="text"
             bind:value={searchQuery}
             placeholder={searchPlaceholder}
-            class="w-full pl-10 pr-4 py-2 text-sm bg-surface-900 border border-surface-600 rounded-lg text-surface-100 placeholder:text-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+            class="w-full pl-9 pr-3 py-1.5 text-sm bg-surface-900 border border-surface-600 rounded-lg text-surface-100 placeholder:text-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
           />
         </div>
       {/if}
-    </div>
 
-    <!-- Center section: Custom toolbar content (filters, etc.) -->
-    <div class="flex-1 flex items-center justify-center gap-2">
       {#if toolbar}
         {@render toolbar()}
       {/if}

@@ -15,7 +15,6 @@
     User,
     Volume2,
     X,
-    Zap,
   } from 'lucide-svelte';
   import type { CallLogsPageData } from './+page.server';
 
@@ -93,7 +92,7 @@
       case 'Inbound':
         return 'text-success';
       case 'Outbound':
-        return 'text-accent';
+        return 'text-text-primary';
       default:
         return 'text-purple-500';
     }
@@ -204,19 +203,15 @@
       <FlaskConical class="w-5 h-5 flex-shrink-0" />
       <p class="text-sm">Demo Mode - showing sample data. Recording playback is disabled.</p>
     </div>
-  {:else if data.canPlayRecordings}
+  {:else if !data.canPlayRecordings && !data.error}
     <div
-      class="bg-success/10 border border-success/20 text-success rounded-lg p-4 flex items-center gap-3 flex-shrink-0"
+      class="bg-bg-secondary border border-border text-text-primary rounded-lg p-4 flex items-center gap-3 flex-shrink-0"
     >
-      <Zap class="w-5 h-5 flex-shrink-0" />
-      <p class="text-sm">Connected to Sapien API - recording playback is available.</p>
-    </div>
-  {:else if !data.error}
-    <div
-      class="bg-accent/10 border border-accent/20 text-accent rounded-lg p-4 flex items-center gap-3 flex-shrink-0"
-    >
-      <AlertCircle class="w-5 h-5 flex-shrink-0" />
-      <p class="text-sm">Recording playback requires SAPIEN_HOST environment variable to be configured.</p>
+      <AlertCircle class="w-5 h-5 flex-shrink-0 text-text-secondary" />
+      <div class="text-sm">
+        <p class="font-medium text-text-primary">Recording playback not configured</p>
+        <p class="text-xs text-text-secondary mt-1">Call recordings require the Sapien API to be configured. Contact your administrator.</p>
+      </div>
     </div>
   {/if}
 
@@ -248,13 +243,13 @@
   <!-- Now Playing Banner -->
   {#if currentlyPlayingId}
     <div
-      class="bg-accent/10 border border-accent/20 text-accent rounded-lg p-4 flex items-center justify-between flex-shrink-0"
+      class="bg-primary-500/10 border border-primary-500/20 text-text-primary rounded-lg p-4 flex items-center justify-between flex-shrink-0"
     >
       <div class="flex items-center gap-3">
         <Volume2 class="w-5 h-5 flex-shrink-0 animate-pulse" />
         <p class="text-sm">Playing recording: {currentlyPlayingId}</p>
       </div>
-      <button onclick={stopPlayback} class="p-1 hover:bg-accent/20 rounded">
+      <button onclick={stopPlayback} class="p-1 hover:bg-primary-500/20 rounded">
         <X class="w-4 h-4" />
       </button>
     </div>
@@ -408,7 +403,7 @@
                 title={data.canPlayRecordings ? 'Play recording' : 'Recording playback not available'}
               >
                 {#if currentlyPlayingId === row.recordingId && isPlaying}
-                  <Pause class="w-4 h-4 text-accent" />
+                  <Pause class="w-4 h-4 text-text-primary" />
                 {:else}
                   <Play class="w-4 h-4" />
                 {/if}

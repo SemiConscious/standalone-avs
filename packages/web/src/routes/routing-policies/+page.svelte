@@ -3,7 +3,7 @@
   import { goto } from '$app/navigation';
   import { Button, Badge, Input } from '$lib/components/ui';
   import DataTable, { type Column } from '$lib/components/ui/DataTable.svelte';
-  import { Plus, FlaskConical, AlertCircle, X } from 'lucide-svelte';
+  import { Plus, FlaskConical, AlertCircle, X, Edit, Trash2 } from 'lucide-svelte';
   import type { RoutingPolicy } from './+page.server';
   import type { ActionData } from './$types';
 
@@ -32,7 +32,7 @@
 
   // Table columns with visibility state
   let columns = $state<Column[]>([
-    { key: 'actions', label: 'Action', width: '120px', visible: true },
+    { key: 'actions', label: '', width: '100px', visible: true },
     { key: 'name', label: 'Policy Name', sortable: true, visible: true },
     { key: 'source', label: 'Source', sortable: true, visible: true },
     { key: 'type', label: 'Type', sortable: true, visible: true },
@@ -214,16 +214,26 @@
 
       {#snippet cell(column, row)}
         {#if column.key === 'actions'}
-          <div class="flex items-center gap-1">
+          <div class="flex items-center justify-end gap-1">
+            <a
+              href="/policy-editor/{row.id}"
+              onclick={(e) => e.stopPropagation()}
+              class="text-text-primary hover:text-primary-300"
+              title="Edit Policy"
+            >
+              <Edit class="w-3.5 h-3.5" />
+            </a>
+            <span class="text-text-secondary">|</span>
             <button
               onclick={(e) => {
                 e.stopPropagation();
                 handleToggleStatus(String(row.id), String(row.status));
               }}
-              class="text-accent hover:underline text-sm"
+              class="text-text-primary hover:text-primary-300 text-xs"
               disabled={data.isDemo}
+              title={row.status === 'Enabled' ? 'Disable Policy' : 'Enable Policy'}
             >
-              {row.status === 'Enabled' ? 'Disable' : 'Enable'}
+              {row.status === 'Enabled' ? 'Off' : 'On'}
             </button>
             <span class="text-text-secondary">|</span>
             {#if showDeleteConfirm === row.id}
@@ -232,7 +242,7 @@
                   e.stopPropagation();
                   handleDelete(String(row.id));
                 }}
-                class="text-error hover:underline text-sm"
+                class="text-error hover:text-error/80 text-xs"
               >
                 Confirm
               </button>
@@ -241,7 +251,7 @@
                   e.stopPropagation();
                   showDeleteConfirm = null;
                 }}
-                class="text-text-secondary hover:underline text-sm"
+                class="text-text-secondary hover:text-text-primary text-xs"
               >
                 Cancel
               </button>
@@ -251,15 +261,16 @@
                   e.stopPropagation();
                   showDeleteConfirm = String(row.id);
                 }}
-                class="text-accent hover:underline text-sm"
+                class="text-text-primary hover:text-primary-300"
                 disabled={data.isDemo}
+                title="Delete Policy"
               >
-                Del
+                <Trash2 class="w-3.5 h-3.5" />
               </button>
             {/if}
           </div>
         {:else if column.key === 'name'}
-          <span class="text-accent font-medium">{row.name}</span>
+          <span class="text-text-primary font-medium">{row.name}</span>
         {:else if column.key === 'source'}
           <Badge variant={row.source === 'Inbound' ? 'accent' : 'neutral'}>
             {row.source}
@@ -315,7 +326,7 @@
       class="relative z-10 bg-bg-secondary rounded-lg shadow-xl max-w-md w-full mx-4 border border-border"
     >
       <div class="flex items-center justify-between p-4 border-b border-border">
-        <h2 class="text-lg font-semibold">Create New Policy</h2>
+        <h2 class="text-lg font-semibold text-text-primary">Create New Policy</h2>
         <button
           onclick={() => {
             showCreateModal = false;
@@ -344,7 +355,7 @@
         class="p-4 space-y-4"
       >
         <div>
-          <label for="policy-name" class="block text-sm font-medium mb-1">Policy Name *</label>
+          <label for="policy-name" class="block text-sm font-medium mb-1 text-text-primary">Policy Name *</label>
           <Input
             id="policy-name"
             name="name"
@@ -355,7 +366,7 @@
         </div>
 
         <div>
-          <label for="policy-description" class="block text-sm font-medium mb-1">Description</label>
+          <label for="policy-description" class="block text-sm font-medium mb-1 text-text-secondary">Description</label>
           <textarea
             id="policy-description"
             name="description"
@@ -367,7 +378,7 @@
         </div>
 
         <div>
-          <label for="policy-type" class="block text-sm font-medium mb-1">Policy Type</label>
+          <label for="policy-type" class="block text-sm font-medium mb-1 text-text-secondary">Policy Type</label>
           <select
             id="policy-type"
             name="type"

@@ -39,3 +39,8 @@ Thumbs.db
 
 # Snyk Security Extension - AI Rules (auto-generated)
 .cursor/rules/snyk_rules.mdc
+.vercel
+
+# Vercel env files
+.env.vercel
+.env.preview

@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getSapienJwt, canGetSapienJwt } from '$lib/server/sapien';
+import { getJwt } from '$lib/server/gatekeeper';
 
 /**
  * Replicate ReactController.getAuthToken(scope)
@@ -8,11 +8,20 @@ import { getSapienJwt, canGetSapienJwt } from '$lib/server/sapien';
  * Body: { scope: "routing-policies:admin" }
  * 
  * Returns: JSON string {"jwt":"eyJhbG..."} - the raw Gatekeeper response
- * This matches what AuthGatekeeper.getAuthToken returns (httpRes.getBody())
+ * 
+ * This uses the new gatekeeper.ts module which:
+ * 1. Fetches API settings from Salesforce (ApexRestProtectedSettings)
+ * 2. Authenticates with Sapien using OAuth password grant
+ * 3. Calls Gatekeeper to get the JWT
  */
 export const POST: RequestHandler = async ({ locals, request }) => {
-  if (!canGetSapienJwt(locals)) {
+  if (!locals.accessToken || !locals.instanceUrl) {
     return json({ error: 'Not authenticated' }, { status: 401 });
+  }
+
+  const salesforceUserId = locals.user?.id;
+  if (!salesforceUserId) {
+    return json({ error: 'Salesforce user ID not available' }, { status: 401 });
   }
 
   try {
@@ -26,32 +35,16 @@ export const POST: RequestHandler = async ({ locals, request }) => {
     // URL decode the scope if it's encoded
     scope = decodeURIComponent(scope);
 
-    const jwtResponse = await getSapienJwt(
-      locals.instanceUrl!,
-      locals.accessToken!,
-      scope
+    // Get JWT using the new gatekeeper module
+    const jwt = await getJwt(
+      locals.instanceUrl,
+      locals.accessToken,
+      scope,
+      salesforceUserId
     );
 
-    // Return the raw Gatekeeper response as-is: {"jwt":"eyJabc..."}
-    // The React app will JSON.parse this to extract the jwt field
-    // If jwtResponse is already JSON with jwt field, return it directly
-    // If it's just the JWT string, wrap it
-    let responseBody: string;
-    try {
-      const parsed = JSON.parse(jwtResponse);
-      if (parsed.jwt) {
-        // Already in correct format
-        responseBody = jwtResponse;
-      } else {
-        // Wrap it
-        responseBody = JSON.stringify({ jwt: jwtResponse });
-      }
-    } catch {
-      // jwtResponse is not JSON, so it's the raw JWT - wrap it
-      responseBody = JSON.stringify({ jwt: jwtResponse });
-    }
-
-    return new Response(responseBody, {
+    // Return in the expected format: {"jwt":"eyJabc..."}
+    return new Response(JSON.stringify({ jwt }), {
       headers: { 'Content-Type': 'text/plain' }
     });
   } catch (e) {
@@ -60,4 +53,3 @@ export const POST: RequestHandler = async ({ locals, request }) => {
     return json({ error: errorMessage }, { status: 500 });
   }
 };
-

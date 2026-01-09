@@ -1,12 +1,11 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { env } from '$env/dynamic/private';
 import { 
-  getSapienJwt, 
-  getSapienConfig, 
-  canGetSapienJwt,
-  SAPIEN_SCOPES 
-} from '$lib/server/sapien';
+  getSapienAccessToken, 
+  getSapienHost, 
+  getOrganizationId,
+  canUseSapienApi 
+} from '$lib/server/gatekeeper';
 
 export const GET: RequestHandler = async ({ params, locals, url }) => {
   const { uuid } = params;
@@ -17,43 +16,33 @@ export const GET: RequestHandler = async ({ params, locals, url }) => {
   }
 
   // Check authentication
-  if (!locals.accessToken || !locals.instanceUrl) {
+  if (!canUseSapienApi(locals)) {
     throw error(401, 'Not authenticated');
   }
 
-  // Check Sapien host is configured
-  const sapienHost = env.SAPIEN_HOST;
-  if (!sapienHost) {
-    throw error(503, 'Sapien API not configured. Set SAPIEN_HOST environment variable.');
-  }
-
-  if (!canGetSapienJwt(locals)) {
-    throw error(401, 'Cannot access Sapien API - invalid session');
-  }
-
   try {
-    // Get Sapien JWT - this also caches the organization ID
-    const jwt = await getSapienJwt(
-      locals.instanceUrl,
-      locals.accessToken,
-      SAPIEN_SCOPES.ENDUSER_BASIC
-    );
+    // Get Sapien access token (this uses the API service account, same as avs-sfdx RestClient)
+    const sapienToken = await getSapienAccessToken(locals.instanceUrl!, locals.accessToken!);
+    const sapienHost = getSapienHost();
+    const organizationId = getOrganizationId();
 
-    // Get org ID from cached JWT
-    const sapienConfig = getSapienConfig();
-    if (!sapienConfig.organizationId) {
-      throw error(503, 'Could not determine organization ID from Sapien JWT');
+    if (!sapienHost) {
+      throw error(503, 'Sapien API host not configured');
+    }
+
+    if (!organizationId) {
+      throw error(503, 'Could not determine organization ID');
     }
 
     // Build the recording URL
     // Sapien recording endpoint format: /organisation/{orgId}/recording/{uuid}
-    const recordingUrl = `${sapienHost}/organisation/${sapienConfig.organizationId}/recording/${uuid}`;
+    const recordingUrl = `${sapienHost}/organisation/${organizationId}/recording/${uuid}`;
 
     if (action === 'stream') {
       // Proxy the recording stream
       const response = await fetch(recordingUrl, {
         headers: {
-          'Authorization': `Bearer ${jwt}`,
+          'Authorization': `Bearer ${sapienToken}`,
           'Accept': 'audio/*',
         },
       });

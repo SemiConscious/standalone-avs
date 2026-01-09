@@ -82,7 +82,7 @@
     {#snippet header()}
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-2">
-          <Settings class="w-5 h-5 text-accent" />
+          <Settings class="w-5 h-5 text-text-primary" />
           <h2 class="font-semibold">Autocomplete Configuration</h2>
         </div>
         <Button 

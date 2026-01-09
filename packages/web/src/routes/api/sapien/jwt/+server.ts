@@ -1,10 +1,20 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getSapienJwt, getSapienOrganizationId, getSapienUserId, canGetSapienJwt } from '$lib/server/sapien';
+import { canUseSapienApi, getJwt, getOrganizationId } from '$lib/server/gatekeeper';
 
+/**
+ * Get a Gatekeeper JWT for a specific scope.
+ * 
+ * GET /api/sapien/jwt?scope=flightdeck:basic
+ * 
+ * Note: This returns a SCOPED JWT from Gatekeeper. The user must have
+ * the requested scope assigned in Sapien for this to work.
+ * 
+ * For general Sapien API access (call logs, recordings, etc.),
+ * use /api/sapien/token instead which returns a Sapien access token.
+ */
 export const GET: RequestHandler = async ({ locals, url }) => {
-  // Check if user is authenticated with Salesforce
-  if (!canGetSapienJwt(locals)) {
+  if (!canUseSapienApi(locals)) {
     return json({
       error: 'Not authenticated with Salesforce. Please log in first.',
     }, { status: 401 });
@@ -13,32 +23,21 @@ export const GET: RequestHandler = async ({ locals, url }) => {
   const scope = url.searchParams.get('scope') || 'flightdeck:basic';
 
   try {
-    // Get JWT from Salesforce Apex REST endpoint
-    const jwtResponse = await getSapienJwt(
+    // Get JWT from Gatekeeper with the specified scope
+    const jwt = await getJwt(
       locals.instanceUrl!,
       locals.accessToken!,
-      scope
+      scope,
+      locals.user?.id
     );
 
-    // Parse the JWT response (it's JSON containing the JWT)
-    let jwt: string;
-    try {
-      const parsed = JSON.parse(jwtResponse);
-      jwt = parsed.jwt || jwtResponse;
-    } catch {
-      jwt = jwtResponse;
-    }
-
-    // Get organization ID and user ID from cached JWT
-    const organizationId = getSapienOrganizationId();
-    const userId = getSapienUserId();
+    const organizationId = getOrganizationId();
 
     return json({
       jwt,
       scope,
       organizationId,
-      userId,
-      message: 'JWT retrieved successfully',
+      message: 'JWT retrieved successfully. Note: The JWT scope will be empty if the user does not have this scope assigned in Sapien.',
     });
   } catch (e) {
     const errorMessage = e instanceof Error ? e.message : String(e);
@@ -50,4 +49,3 @@ export const GET: RequestHandler = async ({ locals, url }) => {
     }, { status: 500 });
   }
 };
-

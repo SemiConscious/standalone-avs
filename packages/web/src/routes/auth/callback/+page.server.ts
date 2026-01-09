@@ -1,6 +1,19 @@
+/**
+ * Platform-Aware OAuth Callback
+ * 
+ * Handles OAuth callbacks for all platforms.
+ * Platform is stored in cookies during login initiation.
+ */
+
 import { error, redirect } from '@sveltejs/kit';
-import { env } from '$env/dynamic/private';
 import type { PageServerLoad } from './$types';
+import { 
+  getPlatformConfig, 
+  getOAuthCredentials,
+  storeSalesforceAuth,
+  type SalesforceAuth,
+  type PlatformType,
+} from '$lib/platform';
 
 export const load: PageServerLoad = async ({ url, cookies }) => {
   const code = url.searchParams.get('code');
@@ -30,134 +43,146 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
     error(400, 'Missing PKCE code verifier');
   }
 
-  // Get stored redirect URI (must match the one used in authorization request)
+  // Get stored redirect URI and platform
   const storedRedirectUri = cookies.get('oauth_redirect_uri');
+  const storedPlatform = cookies.get('oauth_platform') as PlatformType | undefined;
 
   // Clear OAuth cookies
   cookies.delete('oauth_state', { path: '/' });
   cookies.delete('oauth_code_verifier', { path: '/' });
   cookies.delete('oauth_redirect_uri', { path: '/' });
+  cookies.delete('oauth_platform', { path: '/' });
 
-  // Get environment variables
-  const clientId = env.SF_CLIENT_ID;
-  const clientSecret = env.SF_CLIENT_SECRET;
-  // Use the stored redirect URI from the authorization request, or fall back to current URL
-  const defaultRedirectUri = `${url.origin}/auth/callback`;
-  const redirectUri = storedRedirectUri || env.SF_REDIRECT_URI || defaultRedirectUri;
-  const loginUrl = env.SF_LOGIN_URL || 'https://login.salesforce.com';
+  // Determine platform (from stored cookie or default to salesforce for legacy support)
+  const platformType = storedPlatform || 'salesforce';
+  const config = getPlatformConfig(platformType);
 
-  if (!clientId) {
-    console.error('SF_CLIENT_ID environment variable is not set');
-    error(500, 'Salesforce OAuth is not configured properly');
+  // Get OAuth credentials
+  const credentials = getOAuthCredentials(config);
+  if (!credentials) {
+    console.error(`[Callback] OAuth not configured for ${config.name}`);
+    error(500, `${config.name} OAuth is not configured properly`);
   }
 
+  // Build redirect URI
+  const defaultRedirectUri = `${url.origin}/auth/callback`;
+  const redirectUri = storedRedirectUri || defaultRedirectUri;
+
+  const isProduction = process.env.NODE_ENV === 'production';
+
   try {
-    // Build token request body with PKCE code verifier
-    const tokenBody: Record<string, string> = {
-      grant_type: 'authorization_code',
-      code,
-      client_id: clientId,
-      redirect_uri: redirectUri,
-      code_verifier: codeVerifier,
-    };
+    switch (platformType) {
+      case 'salesforce': {
+        const auth = await handleSalesforceCallback({
+          code,
+          codeVerifier,
+          redirectUri,
+          credentials,
+        });
 
-    // Include client secret if provided (required for confidential clients)
-    if (clientSecret) {
-      tokenBody.client_secret = clientSecret;
-    }
-
-    // Exchange code for tokens
-    const tokenResponse = await fetch(`${loginUrl}/services/oauth2/token`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams(tokenBody),
-    });
-
-    if (!tokenResponse.ok) {
-      const errorData = await tokenResponse.text();
-      console.error('Token exchange failed:', errorData);
-      error(500, `Failed to exchange authorization code for tokens: ${errorData}`);
-    }
-
-    const tokens = (await tokenResponse.json()) as {
-      access_token: string;
-      refresh_token?: string;
-      instance_url: string;
-      id: string;
-    };
-
-    // Fetch user info
-    const userInfoResponse = await fetch(tokens.id, {
-      headers: {
-        Authorization: `Bearer ${tokens.access_token}`,
-      },
-    });
-
-    if (!userInfoResponse.ok) {
-      error(500, 'Failed to fetch user info');
-    }
-
-    const userInfo = (await userInfoResponse.json()) as {
-      user_id: string;
-      email: string;
-      name: string;
-      organization_id: string;
-    };
-
-    // Store tokens in secure cookies
-    const isProduction = process.env.NODE_ENV === 'production';
-    const maxAge = 60 * 60 * 24 * 7; // 7 days
-
-    cookies.set('sf_access_token', tokens.access_token, {
-      path: '/',
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: 'lax',
-      maxAge,
-    });
-
-    if (tokens.refresh_token) {
-      cookies.set('sf_refresh_token', tokens.refresh_token, {
-        path: '/',
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: 'lax',
-        maxAge,
-      });
-    }
-
-    cookies.set('sf_instance_url', tokens.instance_url, {
-      path: '/',
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: 'lax',
-      maxAge,
-    });
-
-    // Store user info (less sensitive, accessible to client for display)
-    cookies.set(
-      'user_info',
-      JSON.stringify({
-        id: userInfo.user_id,
-        email: userInfo.email,
-        name: userInfo.name,
-        organizationId: userInfo.organization_id,
-      }),
-      {
-        path: '/',
-        httpOnly: false,
-        secure: isProduction,
-        sameSite: 'lax',
-        maxAge,
+        storeSalesforceAuth(cookies, auth, isProduction);
+        break;
       }
-    );
+
+      case 'dynamics': {
+        // Future: Handle Dynamics callback
+        error(501, 'Dynamics 365 authentication is not yet implemented');
+      }
+
+      default:
+        error(400, `Platform ${platformType} does not support OAuth callback`);
+    }
   } catch (err) {
-    console.error('OAuth callback error:', err);
+    console.error('[Callback] OAuth error:', err);
+    if (err instanceof Error && err.message.includes('OAuth')) {
+      throw err;
+    }
     error(500, 'Authentication failed');
   }
 
   // Redirect to home page on success
   redirect(302, '/');
 };
+
+/**
+ * Handle Salesforce OAuth callback
+ */
+async function handleSalesforceCallback(params: {
+  code: string;
+  codeVerifier: string;
+  redirectUri: string;
+  credentials: {
+    clientId: string;
+    clientSecret: string | undefined;
+    loginUrl: string;
+    scopes: string[];
+  };
+}): Promise<SalesforceAuth> {
+  const { code, codeVerifier, redirectUri, credentials } = params;
+
+  // Build token request body with PKCE code verifier
+  const tokenBody: Record<string, string> = {
+    grant_type: 'authorization_code',
+    code,
+    client_id: credentials.clientId,
+    redirect_uri: redirectUri,
+    code_verifier: codeVerifier,
+  };
+
+  // Include client secret if provided (required for confidential clients)
+  if (credentials.clientSecret) {
+    tokenBody.client_secret = credentials.clientSecret;
+  }
+
+  // Exchange code for tokens
+  const tokenResponse = await fetch(`${credentials.loginUrl}/services/oauth2/token`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams(tokenBody),
+  });
+
+  if (!tokenResponse.ok) {
+    const errorData = await tokenResponse.text();
+    console.error('[Salesforce Callback] Token exchange failed:', errorData);
+    throw new Error(`Failed to exchange authorization code: ${errorData}`);
+  }
+
+  const tokens = await tokenResponse.json() as {
+    access_token: string;
+    refresh_token?: string;
+    instance_url: string;
+    id: string;
+  };
+
+  // Fetch user info
+  const userInfoResponse = await fetch(tokens.id, {
+    headers: {
+      Authorization: `Bearer ${tokens.access_token}`,
+    },
+  });
+
+  if (!userInfoResponse.ok) {
+    throw new Error('Failed to fetch user info');
+  }
+
+  const userInfo = await userInfoResponse.json() as {
+    user_id: string;
+    email: string;
+    name: string;
+    organization_id: string;
+  };
+
+  return {
+    accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token,
+    instanceUrl: tokens.instance_url,
+    user: {
+      id: userInfo.user_id,
+      email: userInfo.email,
+      name: userInfo.name,
+      organizationId: userInfo.organization_id,
+    },
+  };
+}

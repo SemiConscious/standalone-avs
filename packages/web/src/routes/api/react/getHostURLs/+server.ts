@@ -1,12 +1,17 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { hasValidCredentials } from '$lib/server/salesforce';
+import { getApiSettings, getCachedApiSettings, SAPIEN_HOSTS } from '$lib/server/sapien';
 import { env } from '$env/dynamic/private';
 
 /**
  * Replicate ReactController.getHostURLs()
- * Returns API host URLs - since we can't read from API_v1__c (protected),
- * we provide them from environment variables or hardcoded production values.
+ * Returns API host URLs from the API_v1__c custom setting.
+ * 
+ * Now fetches real data from the Apex REST endpoint:
+ * /services/apexrest/nbavs/HostUrlSettings/APISettings
+ * 
+ * Falls back to production defaults if the fetch fails.
  * 
  * GET /api/react/getHostURLs
  */
@@ -15,28 +20,85 @@ export const GET: RequestHandler = async ({ locals }) => {
     return json({ error: 'Not authenticated' }, { status: 401 });
   }
 
-  // Production host URLs (from Natterbox_API.Production.md-meta.xml)
-  const hostURLs: Record<string, string> = {
-    'SapienHost': env.SAPIEN_HOST || 'https://sapien.redmatter.com',
-    'GatekeeperHost': 'https://gatekeeper.redmatter.pub',
-    'WallboardAPIHost': 'https://flightdeck.natterbox.net',
-    'RoutingPolicyEditorHost': 'https://routing-policy-editor.natterbox.net',
-    'CallFlowHost': 'https://callflow.redmatter.pub',
-    'InsightSearchHost': 'https://insight-search.natterbox.net',
-    'GeneralSettingsHost': 'https://omnisettings.natterbox.net',
-    'OmniChannelUIHost': 'https://omnichannel-client-v2.natterbox.net',
-    'OmniChannelRestHost': 'https://omnichannel-us.natterbox.net',
-    'OmniChannelEventsHost': 'https://external-events-us.natterbox.net',
-    'OmniChannelTemplatesHost': 'https://message-templates-us.natterbox.net',
-    'OmniChannelWebsocketHost': 'wss://omnichannelws-us.natterbox.net',
-    'LuminaHost': 'https://lumina.natterbox.net',
-    'AuraHost': 'https://aura.natterbox.net',
-    'CTIRTHost': 'https://cti.natterbox.net',
-    'WebPhoneHost': 'https://webphone.natterbox.net',
-    'LicenceAPIHost': 'https://licence-api.redmatter.pub',
-    'TelemetryHost': 'https://nbtelemetry-beta.herokuapp.com',
+  // Default production host URLs (fallback)
+  const defaultHostURLs = {
+    SapienHost: env.SAPIEN_HOST || SAPIEN_HOSTS.production.sapien,
+    GatekeeperHost: SAPIEN_HOSTS.production.gatekeeper,
+    WallboardAPIHost: SAPIEN_HOSTS.production.wallboardApi,
+    RoutingPolicyEditorHost: SAPIEN_HOSTS.production.routingPolicyEditor,
+    CallFlowHost: SAPIEN_HOSTS.production.callFlow,
+    InsightSearchHost: SAPIEN_HOSTS.production.insightSearch,
+    GeneralSettingsHost: SAPIEN_HOSTS.production.generalSettings,
+    OmniChannelUIHost: 'https://omnichannel-client-v2.natterbox.net',
+    OmniChannelRestHost: SAPIEN_HOSTS.production.omniChannelRest,
+    OmniChannelEventsHost: SAPIEN_HOSTS.production.omniChannelEvents,
+    OmniChannelTemplatesHost: SAPIEN_HOSTS.production.omniChannelTemplates,
+    OmniChannelWebsocketHost: SAPIEN_HOSTS.production.omniChannelWebsocket,
+    LuminaHost: SAPIEN_HOSTS.production.lumina,
+    AuraHost: SAPIEN_HOSTS.production.aura,
+    CTIRTHost: 'https://cti.natterbox.net',
+    WebPhoneHost: SAPIEN_HOSTS.production.webPhone,
+    LicenceAPIHost: SAPIEN_HOSTS.production.licenceApi,
+    TelemetryHost: SAPIEN_HOSTS.production.telemetry,
   };
 
-  return json(hostURLs);
-};
+  try {
+    // Try to get API settings from Salesforce
+    const apiSettings = await getApiSettings(locals.instanceUrl!, locals.accessToken!);
+    
+    // Build host URLs from API settings, falling back to defaults
+    const hostURLs = {
+      SapienHost: apiSettings.Host__c || defaultHostURLs.SapienHost,
+      GatekeeperHost: apiSettings.Gatekeeper_Host__c || defaultHostURLs.GatekeeperHost,
+      WallboardAPIHost: apiSettings.WallboardAPIHost__c || defaultHostURLs.WallboardAPIHost,
+      RoutingPolicyEditorHost: apiSettings.RoutingPolicyEditorHost__c || defaultHostURLs.RoutingPolicyEditorHost,
+      CallFlowHost: apiSettings.CallFlow_Host__c || defaultHostURLs.CallFlowHost,
+      InsightSearchHost: apiSettings.InsightSearchHost__c || defaultHostURLs.InsightSearchHost,
+      GeneralSettingsHost: apiSettings.GeneralSettingsHost__c || defaultHostURLs.GeneralSettingsHost,
+      OmniChannelUIHost: apiSettings.OmniChannelUIHost__c || defaultHostURLs.OmniChannelUIHost,
+      OmniChannelRestHost: apiSettings.OmniChannelRestHost__c || defaultHostURLs.OmniChannelRestHost,
+      OmniChannelEventsHost: apiSettings.OmniChannelEventsHost__c || defaultHostURLs.OmniChannelEventsHost,
+      OmniChannelTemplatesHost: apiSettings.OmniChannelTemplatesHost__c || defaultHostURLs.OmniChannelTemplatesHost,
+      OmniChannelWebsocketHost: apiSettings.OmniChannelWebsocketHost__c || defaultHostURLs.OmniChannelWebsocketHost,
+      LuminaHost: apiSettings.LuminaHost__c || defaultHostURLs.LuminaHost,
+      AuraHost: apiSettings.AuraHost__c || defaultHostURLs.AuraHost,
+      CTIRTHost: defaultHostURLs.CTIRTHost, // Not in API_v1__c
+      WebPhoneHost: apiSettings.WebPhoneHost__c || defaultHostURLs.WebPhoneHost,
+      LicenceAPIHost: apiSettings.LicenceAPIHost__c || defaultHostURLs.LicenceAPIHost,
+      TelemetryHost: apiSettings.TelemetryHost__c || defaultHostURLs.TelemetryHost,
+    };
 
+    return json(hostURLs);
+  } catch (error) {
+    // Fall back to cached settings or defaults
+    console.warn('Failed to fetch host URLs from Salesforce, using defaults:', error);
+    
+    const cachedSettings = getCachedApiSettings();
+    
+    if (cachedSettings) {
+      const hostURLs = {
+        SapienHost: cachedSettings.Host__c || defaultHostURLs.SapienHost,
+        GatekeeperHost: cachedSettings.Gatekeeper_Host__c || defaultHostURLs.GatekeeperHost,
+        WallboardAPIHost: cachedSettings.WallboardAPIHost__c || defaultHostURLs.WallboardAPIHost,
+        RoutingPolicyEditorHost: cachedSettings.RoutingPolicyEditorHost__c || defaultHostURLs.RoutingPolicyEditorHost,
+        CallFlowHost: cachedSettings.CallFlow_Host__c || defaultHostURLs.CallFlowHost,
+        InsightSearchHost: cachedSettings.InsightSearchHost__c || defaultHostURLs.InsightSearchHost,
+        GeneralSettingsHost: cachedSettings.GeneralSettingsHost__c || defaultHostURLs.GeneralSettingsHost,
+        OmniChannelUIHost: cachedSettings.OmniChannelUIHost__c || defaultHostURLs.OmniChannelUIHost,
+        OmniChannelRestHost: cachedSettings.OmniChannelRestHost__c || defaultHostURLs.OmniChannelRestHost,
+        OmniChannelEventsHost: cachedSettings.OmniChannelEventsHost__c || defaultHostURLs.OmniChannelEventsHost,
+        OmniChannelTemplatesHost: cachedSettings.OmniChannelTemplatesHost__c || defaultHostURLs.OmniChannelTemplatesHost,
+        OmniChannelWebsocketHost: cachedSettings.OmniChannelWebsocketHost__c || defaultHostURLs.OmniChannelWebsocketHost,
+        LuminaHost: cachedSettings.LuminaHost__c || defaultHostURLs.LuminaHost,
+        AuraHost: cachedSettings.AuraHost__c || defaultHostURLs.AuraHost,
+        CTIRTHost: defaultHostURLs.CTIRTHost,
+        WebPhoneHost: cachedSettings.WebPhoneHost__c || defaultHostURLs.WebPhoneHost,
+        LicenceAPIHost: cachedSettings.LicenceAPIHost__c || defaultHostURLs.LicenceAPIHost,
+        TelemetryHost: cachedSettings.TelemetryHost__c || defaultHostURLs.TelemetryHost,
+      };
+      return json(hostURLs);
+    }
+
+    return json(defaultHostURLs);
+  }
+};

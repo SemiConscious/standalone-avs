@@ -6,123 +6,133 @@
  * Returns the Sapien API configuration status and connection test results.
  * 
  * The standalone app gets Sapien access by:
- * 1. Using the user's Salesforce access token
- * 2. Calling the Apex REST endpoint /services/apexrest/token/{scope}
- * 3. Receiving a Sapien JWT that can be used for API calls
- * 
- * This leverages the existing Salesforce infrastructure and doesn't
- * require separate Sapien credentials.
+ * 1. Using the user's Salesforce access token to fetch API settings
+ * 2. Authenticating with Sapien using OAuth password grant (same as avs-sfdx RestClient)
+ * 3. Using the Sapien access token for general API calls
+ * 4. Using Gatekeeper JWT for specific scoped operations
  */
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { 
-  canGetSapienJwt, 
-  getSapienJwt,
-  getSapienConfig,
-  isSapienDirectConfigured,
-  getCachedJwtPayload,
-  getSapienOrganizationId,
-  getSapienUserId,
-  getSapienUsername,
-  SAPIEN_SCOPES,
-} from '$lib/server/sapien';
+  canUseSapienApi, 
+  getSapienAccessToken,
+  getSapienHost,
+  getOrganizationId,
+  getSapienUserDetails,
+  getJwt,
+} from '$lib/server/gatekeeper';
 
 export const GET: RequestHandler = async ({ locals }) => {
-  const hasSalesforceSession = canGetSapienJwt(locals);
+  const hasSalesforceSession = canUseSapienApi(locals);
   
+  let sapienAccessTest: { success: boolean; error?: string; scope?: string } = { success: false };
   let jwtTest: { success: boolean; error?: string; scope?: string } = { success: false };
-  let jwtPayload: Record<string, unknown> | null = null;
+  let userDetails: { id?: number; username?: string; scopes?: string[] } = {};
   
-  // Test getting a Sapien JWT via the Salesforce Apex REST endpoint
+  // Test getting Sapien access token (for general API access)
   if (hasSalesforceSession) {
     try {
-      const jwt = await getSapienJwt(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        SAPIEN_SCOPES.ENDUSER_BASIC
-      );
-      jwtTest = { 
-        success: !!jwt, 
-        scope: SAPIEN_SCOPES.ENDUSER_BASIC,
+      const token = await getSapienAccessToken(locals.instanceUrl!, locals.accessToken!);
+      sapienAccessTest = { 
+        success: !!token, 
+        scope: 'user admin', // The scope returned from OAuth password grant
       };
       
-      // Get the decoded payload
-      const payload = getCachedJwtPayload();
-      if (payload) {
-        // Show full payload to see what fields are available
-        jwtPayload = {
-          ...payload,
-          // Add human-readable expiration
-          expiresAt: payload.exp ? new Date(payload.exp * 1000).toISOString() : undefined,
-        };
+      // Get user details including scopes
+      const orgId = getOrganizationId();
+      if (orgId) {
+        // Try to get user details to see available scopes
+        try {
+          // We need a user ID - for now use a placeholder
+          const details = await getSapienUserDetails(orgId, 119010); // TODO: Get actual user ID
+          userDetails = {
+            id: details.id,
+            username: details.username,
+            scopes: details.scopes,
+          };
+        } catch {
+          // User details fetch failed, continue without
+        }
       }
     } catch (error) {
-      jwtTest = { 
+      sapienAccessTest = { 
         success: false, 
         error: error instanceof Error ? error.message : 'Unknown error',
       };
     }
+
+    // Test getting a Gatekeeper JWT (for scoped operations)
+    if (userDetails.scopes && userDetails.scopes.length > 0) {
+      try {
+        const testScope = userDetails.scopes[0];
+        const jwt = await getJwt(
+          locals.instanceUrl!,
+          locals.accessToken!,
+          testScope,
+          locals.user?.id
+        );
+        jwtTest = { 
+          success: !!jwt, 
+          scope: testScope,
+        };
+      } catch (error) {
+        jwtTest = { 
+          success: false, 
+          error: error instanceof Error ? error.message : 'Unknown error',
+        };
+      }
+    }
   }
 
-  // Get extracted values from JWT
-  const orgId = getSapienOrganizationId();
-  const userId = getSapienUserId();
-  const username = getSapienUsername();
-
-  // Get config AFTER JWT retrieval (so org ID from JWT is available)
-  const config = getSapienConfig();
-  const hasDirectConfig = isSapienDirectConfigured();
+  // Get config values
+  const sapienHost = getSapienHost();
+  const orgId = getOrganizationId();
 
   return json({
     // Authentication method
-    authMethod: 'salesforce-apex-rest',
+    authMethod: 'sapien-oauth-password-grant',
     
     // Salesforce session status
     salesforceSession: {
       hasAccessToken: !!locals.accessToken,
       hasInstanceUrl: !!locals.instanceUrl,
-      canGetSapienJwt: hasSalesforceSession,
+      canUseSapienApi: hasSalesforceSession,
     },
     
-    // JWT retrieval test (via /services/apexrest/token/{scope})
-    jwtTest,
+    // Sapien access token test (for general API calls - same as avs-sfdx RestClient)
+    sapienAccessTest,
     
-    // Extracted Sapien identity (from JWT claims)
-    sapienIdentity: {
-      organizationId: orgId,
-      userId: userId,
-      username: username,
-    },
+    // Gatekeeper JWT test (for scoped operations)
+    gatekeeperJwtTest: jwtTest,
     
-    // Full JWT payload (for debugging)
-    jwtPayload,
+    // User's assigned Sapien scopes
+    userScopes: userDetails.scopes || [],
     
-    // Sapien config (host from env, org ID from JWT or env)
+    // Sapien config
     sapienConfig: {
-      host: config.host ? '***configured***' : undefined,
-      organizationId: config.organizationId,
-      organizationIdSource: orgId ? 'jwt' : (config.organizationId ? 'env' : 'none'),
-      directApiConfigured: hasDirectConfig,
+      host: sapienHost ? '***configured***' : undefined,
+      organizationId: orgId,
     },
     
     // Available features based on current configuration
     features: {
-      // These work with the Apex REST endpoint (JWT-based)
-      sapienJwtAccess: hasSalesforceSession && jwtTest.success,
-      realTimeCallStatus: hasSalesforceSession && jwtTest.success && hasDirectConfig,
-      callRecordings: hasSalesforceSession && jwtTest.success && hasDirectConfig,
+      // General Sapien API access (call logs, recordings, sounds, etc.)
+      sapienApiAccess: sapienAccessTest.success,
       
-      // These work via Salesforce SOQL (always available with SF session)
+      // Scoped operations (wallboards, insights, etc.)
+      scopedOperations: jwtTest.success,
+      availableScopes: userDetails.scopes || [],
+      
+      // Salesforce data access
       salesforceDataAccess: hasSalesforceSession,
     },
     
     // How to enable features
     setup: {
       forBasicFeatures: 'Authenticate with Salesforce OAuth',
-      forAdvancedFeatures: 'Set SAPIEN_HOST environment variable (org ID is extracted from JWT automatically)',
-      apexRestEndpoint: '/services/apexrest/token/{scope}',
-      availableScopes: Object.values(SAPIEN_SCOPES).filter(s => s !== 'avs:api'),
+      forScopedFeatures: 'User must have scopes assigned in Sapien (e.g., flightdeck:admin, insights:admin)',
+      authentication: 'Uses API credentials from Salesforce custom settings to authenticate with Sapien',
     },
   });
 };

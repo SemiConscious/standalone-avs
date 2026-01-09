@@ -1,26 +1,26 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
+  import { enhance } from '$app/forms';
   import { Button, Badge } from '$lib/components/ui';
   import DataTable from '$lib/components/ui/DataTable.svelte';
   import type { Column } from '$lib/components/ui/DataTable.svelte';
+  import { toasts } from '$lib/stores/toast';
   import {
     Plus,
-    Mail,
-    Phone,
     Edit,
     Trash2,
     FlaskConical,
     AlertCircle,
-    UserMinus,
     RefreshCw,
     Shield,
     Headphones,
     Monitor,
     MessageSquare,
-    Eye,
     ChevronLeft,
     ChevronRight,
+    Phone,
+    Eye,
   } from 'lucide-svelte';
   import type { User } from './+page.server';
   import type { PaginationMeta } from '$lib/server/pagination';
@@ -32,9 +32,14 @@
       isDemo: boolean;
       error?: string;
     };
+    form?: {
+      success?: boolean;
+      error?: string;
+      message?: string;
+    };
   }
 
-  let { data }: Props = $props();
+  let { data, form }: Props = $props();
 
   // Get current filter from URL
   const currentStatus = $derived($page.url.searchParams.get('status') || '');
@@ -49,7 +54,7 @@
     { key: 'licenses', label: 'Licenses' },
     { key: 'availabilityProfile', label: 'Availability' },
     { key: 'groups', label: 'Groups' },
-    { key: 'actions', label: 'Actions', width: '120px' },
+    { key: 'actions', label: 'Actions', width: '100px' },
   ]);
 
   // Transform users for the data table (no client-side filtering needed)
@@ -136,51 +141,55 @@
   <title>Natterbox Users | Natterbox AVS</title>
 </svelte:head>
 
-<div class="flex flex-col gap-6 h-full min-h-0">
+<div class="flex flex-col h-[calc(100vh-120px)]">
   <!-- Demo Mode Banner -->
   {#if data.isDemo}
-    <div
-      class="bg-warning/10 border border-warning/20 text-warning rounded-lg p-4 flex items-center gap-3 flex-shrink-0"
-    >
-      <FlaskConical class="w-5 h-5 flex-shrink-0" />
-      <p class="text-sm">Demo Mode - showing sample data</p>
+    <div class="bg-warning/10 border border-warning/20 text-warning rounded-lg p-2 flex items-center gap-2 flex-shrink-0 mb-3 text-sm">
+      <FlaskConical class="w-4 h-4 flex-shrink-0" />
+      <span>Demo Mode - showing sample data</span>
     </div>
   {/if}
 
   <!-- Error Banner -->
-  {#if data.error}
-    <div
-      class="bg-error/10 border border-error/20 text-error rounded-lg p-4 flex items-center gap-3 flex-shrink-0"
-    >
-      <AlertCircle class="w-5 h-5 flex-shrink-0" />
-      <p>{data.error}</p>
+  {#if data.error || form?.error}
+    <div class="bg-error/10 border border-error/20 text-error rounded-lg p-2 flex items-center gap-2 flex-shrink-0 mb-3 text-sm">
+      <AlertCircle class="w-4 h-4 flex-shrink-0" />
+      <span>{data.error || form?.error}</span>
     </div>
   {/if}
 
-  <!-- Page Header -->
-  <div class="flex items-center justify-between flex-shrink-0">
+  <!-- Success Banner -->
+  {#if form?.success}
+    <div class="bg-success/10 border border-success/20 text-success rounded-lg p-2 flex items-center gap-2 flex-shrink-0 mb-3 text-sm">
+      <span>{form?.message || 'Operation completed successfully'}</span>
+    </div>
+  {/if}
+
+  <!-- Page Header - compact -->
+  <div class="flex items-center justify-between flex-shrink-0 mb-3">
     <div>
-      <h1 class="text-2xl font-bold text-text-primary">Natterbox Users</h1>
-      <p class="text-text-secondary mt-1">
-        Manage AVS user accounts, licenses, and permissions
+      <h1 class="text-lg font-bold text-text-primary">Natterbox Users</h1>
+      <p class="text-text-secondary text-xs">
         {#if data.pagination.totalItems > 0}
-          <span class="text-text-primary font-medium">({data.pagination.totalItems} total)</span>
+          {data.pagination.totalItems} users
+        {:else}
+          Manage user accounts and licenses
         {/if}
       </p>
     </div>
     <div class="flex gap-2">
-      <Button variant="secondary" onclick={handleRefresh}>
-        <RefreshCw class="w-4 h-4" />
+      <Button variant="secondary" size="sm" onclick={handleRefresh}>
+        <RefreshCw class="w-3.5 h-3.5" />
         Sync
       </Button>
-      <Button variant="primary" href="/users/new">
-        <Plus class="w-4 h-4" />
+      <Button variant="primary" size="sm" href="/users/new">
+        <Plus class="w-3.5 h-3.5" />
         Add User
       </Button>
     </div>
   </div>
 
-  <!-- Data Table -->
+  <!-- Data Table - flex-1 to fill remaining space -->
   <div class="flex-1 min-h-0">
     <DataTable
       data={tableData}
@@ -197,14 +206,14 @@
         <!-- Server-side search input -->
         <input
           type="text"
-          placeholder="Search by name, email, username, or extension..."
+          placeholder="Search users..."
           value={currentSearch}
           oninput={handleSearchChange}
-          class="px-3 py-2 text-sm bg-surface-900 border border-surface-600 rounded-lg text-surface-100 focus:outline-none focus:ring-2 focus:ring-primary-500 w-72"
+          class="px-3 py-1.5 text-sm bg-surface-900 border border-surface-600 rounded-lg text-surface-100 focus:outline-none focus:ring-2 focus:ring-primary-500 w-64"
         />
         <!-- Server-side status filter -->
         <select
-          class="px-3 py-2 text-sm bg-surface-900 border border-surface-600 rounded-lg text-surface-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+          class="px-3 py-1.5 text-sm bg-surface-900 border border-surface-600 rounded-lg text-surface-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
           value={currentStatus}
           onchange={handleStatusChange}
         >
@@ -217,9 +226,9 @@
 
       {#snippet cell(column, row)}
         {#if column.key === 'user'}
-          <div class="flex items-center gap-3">
+          <div class="flex items-center gap-2">
             <div
-              class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium"
+              class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium flex-shrink-0"
               class:bg-success={row.status === 'active'}
               class:text-white={row.status === 'active'}
               class:bg-bg-tertiary={row.status !== 'active'}
@@ -227,86 +236,63 @@
             >
               {getInitials(String(row.name))}
             </div>
-            <div>
-              <span class="font-medium text-accent">{row.name}</span>
-              <p class="text-sm text-text-secondary flex items-center gap-1">
-                <Mail class="w-3 h-3" />
-                {row.username || 'No username'}
-              </p>
-              {#if row.linkedSalesforceUser}
-                <p class="text-xs text-text-secondary">
-                  SF: {(row.linkedSalesforceUser as { name: string }).name}
-                </p>
-              {/if}
+            <div class="min-w-0">
+              <span class="font-medium text-text-primary hover:text-primary-300 text-sm block truncate">{row.name}</span>
+              <p class="text-xs text-text-secondary truncate">{row.username || 'No username'}</p>
             </div>
           </div>
         {:else if column.key === 'extension'}
-          <span class="flex items-center gap-1 font-mono">
-            <Phone class="w-4 h-4 text-text-secondary" />
-            {row.extension || '—'}
-          </span>
-          {#if row.mobilePhone}
-            <p class="text-xs text-text-secondary mt-1">{row.mobilePhone}</p>
-          {/if}
+          <span class="font-mono text-sm">{row.extension || '—'}</span>
         {:else if column.key === 'status'}
-          <Badge variant={getStatusVariant(row.status as User['status'])}>
+          <Badge variant={getStatusVariant(row.status as User['status'])} size="sm">
             {row.status}
           </Badge>
         {:else if column.key === 'permissionLevel'}
-          <Badge variant={row.permissionLevel === 'Admin' ? 'accent' : 'neutral'}>
+          <Badge variant={row.permissionLevel === 'Admin' ? 'accent' : 'neutral'} size="sm">
             {row.permissionLevel || 'Basic'}
           </Badge>
         {:else if column.key === 'licenses'}
           {@const licenses = row.licenses as User['licenses']}
-          <div class="flex flex-wrap gap-1">
+          <div class="flex flex-wrap gap-0.5">
             {#if licenses.cti}
-              <span class="inline-flex items-center justify-center w-6 h-6 rounded bg-accent/10 text-accent" title="CTI">
+              <span class="inline-flex items-center justify-center w-5 h-5 rounded bg-accent/10 text-text-primary" title="CTI">
                 <Headphones class="w-3 h-3" />
               </span>
             {/if}
             {#if licenses.pbx}
-              <span class="inline-flex items-center justify-center w-6 h-6 rounded bg-success/10 text-success" title="PBX">
+              <span class="inline-flex items-center justify-center w-5 h-5 rounded bg-success/10 text-success" title="PBX">
                 <Phone class="w-3 h-3" />
               </span>
             {/if}
             {#if licenses.manager}
-              <span class="inline-flex items-center justify-center w-6 h-6 rounded bg-warning/10 text-warning" title="Manager">
+              <span class="inline-flex items-center justify-center w-5 h-5 rounded bg-warning/10 text-warning" title="Manager">
                 <Shield class="w-3 h-3" />
               </span>
             {/if}
             {#if licenses.record}
-              <span class="inline-flex items-center justify-center w-6 h-6 rounded bg-error/10 text-error" title="Record">
+              <span class="inline-flex items-center justify-center w-5 h-5 rounded bg-error/10 text-error" title="Record">
                 <Monitor class="w-3 h-3" />
               </span>
             {/if}
             {#if licenses.sms || licenses.whatsApp}
-              <span class="inline-flex items-center justify-center w-6 h-6 rounded bg-green-500/10 text-green-500" title="Messaging">
+              <span class="inline-flex items-center justify-center w-5 h-5 rounded bg-green-500/10 text-green-500" title="Messaging">
                 <MessageSquare class="w-3 h-3" />
               </span>
             {/if}
             {#if licenses.insights}
-              <span class="inline-flex items-center justify-center w-6 h-6 rounded bg-purple-500/10 text-purple-500" title="AI Advisor">
+              <span class="inline-flex items-center justify-center w-5 h-5 rounded bg-purple-500/10 text-purple-500" title="AI Advisor">
                 <Eye class="w-3 h-3" />
               </span>
             {/if}
             {#if getLicenseCount(licenses) === 0}
-              <span class="text-text-secondary text-sm">—</span>
+              <span class="text-text-secondary text-xs">—</span>
             {/if}
           </div>
         {:else if column.key === 'availabilityProfile'}
-          {#if row.availabilityProfile}
-            <div class="text-sm">
-              <p>{row.availabilityProfile}</p>
-              {#if row.availabilityState}
-                <p class="text-text-secondary text-xs">{row.availabilityState}</p>
-              {/if}
-            </div>
-          {:else}
-            <span class="text-text-secondary">—</span>
-          {/if}
+          <span class="text-sm truncate">{row.availabilityProfile || '—'}</span>
         {:else if column.key === 'groups'}
           {@const groups = row.groups as string[]}
-          <div class="flex flex-wrap gap-1 max-w-[150px]">
+          <div class="flex flex-wrap gap-0.5 max-w-[100px]">
             {#each groups.slice(0, 2) as group}
               <Badge variant="neutral" size="sm">{group}</Badge>
             {/each}
@@ -314,62 +300,80 @@
               <Badge variant="neutral" size="sm">+{groups.length - 2}</Badge>
             {/if}
             {#if groups.length === 0}
-              <span class="text-text-secondary text-sm">—</span>
+              <span class="text-text-secondary text-xs">—</span>
             {/if}
           </div>
         {:else if column.key === 'actions'}
           <div class="flex items-center justify-end gap-1">
-            <Button variant="ghost" size="sm" href="/users/{row.id}" onclick={(e: MouseEvent) => e.stopPropagation()}>
-              <Eye class="w-4 h-4" />
+            <Button variant="ghost" size="sm" href="/users/{row.id}" title="View/Edit User">
+              <Edit class="w-3.5 h-3.5" />
             </Button>
-            <Button variant="ghost" size="sm" href="/users/{row.id}/edit" onclick={(e: MouseEvent) => e.stopPropagation()}>
-              <Edit class="w-4 h-4" />
-            </Button>
-            {#if row.enabled}
-              <Button variant="ghost" size="sm" title="Disable User" onclick={(e: MouseEvent) => e.stopPropagation()}>
-                <UserMinus class="w-4 h-4 text-warning" />
+            <form
+              method="POST"
+              action="?/delete"
+              use:enhance={() => {
+                return async ({ result, update }) => {
+                  await update();
+                  if (result.type === 'success' && result.data?.success) {
+                    toasts.success('User deleted successfully');
+                    goto($page.url.pathname + $page.url.search, { invalidateAll: true });
+                  } else if (result.type === 'failure') {
+                    toasts.error(result.data?.error || 'Failed to delete user');
+                  }
+                };
+              }}
+              onclick={(e: MouseEvent) => e.stopPropagation()}
+            >
+              <input type="hidden" name="userId" value={row.id} />
+              <Button
+                variant="ghost"
+                size="sm"
+                type="submit"
+                title="Delete User"
+                onclick={(e: MouseEvent) => {
+                  if (!confirm(`Are you sure you want to delete user "${row.name}"? This action cannot be undone.`)) {
+                    e.preventDefault();
+                  }
+                }}
+              >
+                <Trash2 class="w-3.5 h-3.5 text-error" />
               </Button>
-            {/if}
-            <Button variant="ghost" size="sm" title="Delete User" onclick={(e: MouseEvent) => e.stopPropagation()}>
-              <Trash2 class="w-4 h-4 text-error" />
-            </Button>
+            </form>
           </div>
         {:else}
           {row[column.key] ?? '—'}
         {/if}
       {/snippet}
     </DataTable>
-
-    <!-- Server-Side Pagination Controls -->
-    {#if data.pagination.totalPages > 1}
-      <div class="flex items-center justify-between px-4 py-3 border-t border-surface-600">
-        <div class="text-sm text-text-secondary">
-          Showing {((data.pagination.page - 1) * data.pagination.pageSize) + 1} to {Math.min(data.pagination.page * data.pagination.pageSize, data.pagination.totalItems)} of {data.pagination.totalItems} users
-        </div>
-        <div class="flex items-center gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={!data.pagination.hasPreviousPage}
-            onclick={() => handlePageChange(data.pagination.page - 1)}
-          >
-            <ChevronLeft class="w-4 h-4" />
-            Previous
-          </Button>
-          <span class="text-sm text-text-secondary px-2">
-            Page {data.pagination.page} of {data.pagination.totalPages}
-          </span>
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={!data.pagination.hasNextPage}
-            onclick={() => handlePageChange(data.pagination.page + 1)}
-          >
-            Next
-            <ChevronRight class="w-4 h-4" />
-          </Button>
-        </div>
-      </div>
-    {/if}
   </div>
+
+  <!-- Server-Side Pagination Controls -->
+  {#if data.pagination.totalPages > 1}
+    <div class="flex items-center justify-between px-3 py-2 border-t border-surface-600 bg-surface-700 flex-shrink-0 rounded-b-lg mt-px">
+      <div class="text-xs text-text-secondary">
+        {((data.pagination.page - 1) * data.pagination.pageSize) + 1}–{Math.min(data.pagination.page * data.pagination.pageSize, data.pagination.totalItems)} of {data.pagination.totalItems}
+      </div>
+      <div class="flex items-center gap-2">
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={!data.pagination.hasPreviousPage}
+          onclick={() => handlePageChange(data.pagination.page - 1)}
+        >
+          <ChevronLeft class="w-4 h-4" />
+        </Button>
+        <span class="text-xs text-text-secondary">
+          {data.pagination.page}/{data.pagination.totalPages}
+        </span>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={!data.pagination.hasNextPage}
+          onclick={() => handlePageChange(data.pagination.page + 1)}
+        >
+          <ChevronRight class="w-4 h-4" />
+        </Button>
+      </div>
+    </div>
+  {/if}
 </div>

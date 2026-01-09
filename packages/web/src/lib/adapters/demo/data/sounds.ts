@@ -1,0 +1,88 @@
+/**
+ * Demo Sound Data
+ */
+
+import type { Sound, TTSVoice } from '$lib/domain';
+
+export const DEMO_SOUNDS: Sound[] = [
+  {
+    id: 'demo-snd001',
+    platformId: 3001,
+    name: 'Welcome Greeting',
+    description: 'Main welcome message for incoming calls',
+    type: 'greeting',
+    format: 'wav',
+    duration: 12,
+    fileSize: 192000,
+    createdDate: '2025-11-01T10:00:00Z',
+    lastModifiedDate: '2025-12-15T14:30:00Z',
+    createdByName: 'John Smith',
+    isSystem: false,
+  },
+  {
+    id: 'demo-snd002',
+    platformId: 3002,
+    name: 'Hold Music - Jazz',
+    description: 'Smooth jazz hold music',
+    type: 'music',
+    format: 'mp3',
+    duration: 180,
+    fileSize: 2880000,
+    createdDate: '2025-10-15T09:00:00Z',
+    lastModifiedDate: '2025-10-15T09:00:00Z',
+    createdByName: 'System',
+    isSystem: true,
+  },
+  {
+    id: 'demo-snd003',
+    platformId: 3003,
+    name: 'Press 1 for Sales',
+    description: 'IVR menu option prompt',
+    type: 'prompt',
+    format: 'wav',
+    duration: 3,
+    fileSize: 48000,
+    createdDate: '2025-11-20T11:00:00Z',
+    lastModifiedDate: '2025-11-20T11:00:00Z',
+    createdByName: 'Jane Doe',
+    isSystem: false,
+  },
+  {
+    id: 'demo-snd004',
+    platformId: 3004,
+    name: 'Thank You',
+    description: 'End of call thank you message',
+    type: 'announcement',
+    format: 'wav',
+    duration: 5,
+    fileSize: 80000,
+    createdDate: '2025-11-25T15:00:00Z',
+    lastModifiedDate: '2026-01-05T10:00:00Z',
+    createdByName: 'John Smith',
+    isSystem: false,
+  },
+  {
+    id: 'demo-snd005',
+    platformId: 3005,
+    name: 'Voicemail Greeting',
+    description: 'Default voicemail greeting',
+    type: 'voicemail',
+    format: 'wav',
+    duration: 15,
+    fileSize: 240000,
+    createdDate: '2025-09-01T08:00:00Z',
+    lastModifiedDate: '2025-09-01T08:00:00Z',
+    createdByName: 'System',
+    isSystem: true,
+  },
+];
+
+export const DEMO_TTS_VOICES: TTSVoice[] = [
+  { id: 'amy', name: 'Amy (British)', languageCode: 'en-GB', gender: 'female', provider: 'aws' },
+  { id: 'brian', name: 'Brian (British)', languageCode: 'en-GB', gender: 'male', provider: 'aws' },
+  { id: 'joanna', name: 'Joanna (American)', languageCode: 'en-US', gender: 'female', provider: 'aws' },
+  { id: 'matthew', name: 'Matthew (American)', languageCode: 'en-US', gender: 'male', provider: 'aws' },
+  { id: 'emma', name: 'Emma (British)', languageCode: 'en-GB', gender: 'female', provider: 'aws' },
+  { id: 'hans', name: 'Hans (German)', languageCode: 'de-DE', gender: 'male', provider: 'aws' },
+  { id: 'celine', name: 'Céline (French)', languageCode: 'fr-FR', gender: 'female', provider: 'aws' },
+];

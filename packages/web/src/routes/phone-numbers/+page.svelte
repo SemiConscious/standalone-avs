@@ -14,6 +14,7 @@
     MessageSquare,
     MapPin,
     Globe,
+    Edit,
   } from 'lucide-svelte';
   import type { PhoneNumber } from './+page.server';
 
@@ -215,18 +216,19 @@
       {#snippet cell(column, row)}
         {#if column.key === 'actions'}
           <a
-            href="/phone-numbers/{row.id}/edit"
-            class="text-accent hover:underline text-sm"
+            href="/phone-numbers/{row.id}"
+            class="text-text-primary hover:text-primary-300"
+            title="Edit Phone Number"
           >
-            Edit
+            <Edit class="w-3.5 h-3.5" />
           </a>
         {:else if column.key === 'name'}
-          <a href="/phone-numbers/{row.id}" class="text-accent hover:underline font-medium">
+          <a href="/phone-numbers/{row.id}" class="text-text-primary hover:text-primary-300 hover:underline font-medium">
             {row.name || row.number}
           </a>
         {:else if column.key === 'userName'}
           {#if row.userName}
-            <a href="/users?id={row.userId}" class="text-accent hover:underline flex items-center gap-1">
+            <a href="/users/{row.userId}" class="text-text-primary hover:text-primary-300 hover:underline flex items-center gap-1">
               <User class="w-3 h-3" />
               {row.userName}
             </a>
@@ -263,7 +265,7 @@
           </div>
         {:else if column.key === 'callFlowName'}
           {#if row.callFlowName}
-            <a href="/routing-policies?id={row.callFlowId}" class="text-accent hover:underline flex items-center gap-1">
+            <a href="/routing-policies/{row.callFlowId}" class="text-text-primary hover:text-primary-300 hover:underline flex items-center gap-1">
               <Workflow class="w-3 h-3" />
               {row.callFlowName}
             </a>

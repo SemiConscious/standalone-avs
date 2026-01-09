@@ -1,5 +1,11 @@
-import { env } from '$env/dynamic/private';
+/**
+ * Homepage Server
+ * 
+ * Platform-aware dashboard that shows stats for the current platform.
+ */
+
 import type { PageServerLoad } from './$types';
+import { createAdapterContext, isSalesforceContext } from '$lib/adapters';
 
 interface DashboardStats {
   totalUsers: number;
@@ -15,7 +21,7 @@ interface SoqlCountResult {
 }
 
 /**
- * Demo mode stats - used when DEMO_MODE=true or when not authenticated
+ * Demo mode stats
  */
 const DEMO_STATS: DashboardStats = {
   totalUsers: 142,
@@ -23,13 +29,6 @@ const DEMO_STATS: DashboardStats = {
   registeredDevices: 89,
   activeCallFlows: 18,
 };
-
-/**
- * Check if demo mode is enabled
- */
-function isDemoMode(): boolean {
-  return env.DEMO_MODE === 'true' || env.DEMO_MODE === '1';
-}
 
 async function fetchSalesforceCount(
   instanceUrl: string,
@@ -64,48 +63,52 @@ async function fetchSalesforceCount(
 }
 
 export const load: PageServerLoad = async ({ locals }) => {
-  // Demo mode - return mock data without authentication
-  if (isDemoMode()) {
+  // Create adapter context
+  let ctx;
+  try {
+    ctx = createAdapterContext(locals);
+  } catch {
+    // If context creation fails, return demo data
     return {
       stats: DEMO_STATS,
       isDemo: true,
     };
   }
 
-  // If not authenticated, return null stats
-  if (!locals.accessToken || !locals.instanceUrl) {
+  // Demo mode - return demo stats
+  if (!isSalesforceContext(ctx)) {
     return {
-      stats: null,
+      stats: DEMO_STATS,
+      isDemo: true,
     };
   }
 
+  // Salesforce mode - fetch real stats
   try {
-    // Fetch counts from Salesforce in parallel
-    // Objects use the 'nbavs' namespace prefix
-    const [totalUsers, activeGroups, registeredDevices, activeCallFlows] = await Promise.all([
-      fetchSalesforceCount(locals.instanceUrl, locals.accessToken, 'nbavs__User__c'),
-      fetchSalesforceCount(locals.instanceUrl, locals.accessToken, 'nbavs__Group__c'),
-      fetchSalesforceCount(locals.instanceUrl, locals.accessToken, 'nbavs__Device__c'),
-      fetchSalesforceCount(locals.instanceUrl, locals.accessToken, 'nbavs__CallFlow__c', "nbavs__Status__c = 'Enabled'"),
+    const ns = 'nbavs';
+
+    const [users, groups, devices, callFlows] = await Promise.all([
+      fetchSalesforceCount(ctx.instanceUrl, ctx.accessToken, `${ns}__User__c`),
+      fetchSalesforceCount(ctx.instanceUrl, ctx.accessToken, `${ns}__Group__c`),
+      fetchSalesforceCount(ctx.instanceUrl, ctx.accessToken, `${ns}__Device__c`),
+      fetchSalesforceCount(ctx.instanceUrl, ctx.accessToken, `${ns}__CallFlow__c`),
     ]);
 
-    const stats: DashboardStats = {
-      totalUsers,
-      activeGroups,
-      registeredDevices,
-      activeCallFlows,
-    };
-
     return {
-      stats,
+      stats: {
+        totalUsers: users,
+        activeGroups: groups,
+        registeredDevices: devices,
+        activeCallFlows: callFlows,
+      } satisfies DashboardStats,
       isDemo: false,
     };
   } catch (error) {
     console.error('Failed to fetch dashboard stats:', error);
     return {
       stats: null,
-      error: 'Failed to load dashboard data',
+      isDemo: false,
+      error: 'Failed to load dashboard',
     };
   }
 };
-

@@ -213,6 +213,11 @@ export const KEY_OPTIONS = [
 ] as const;
 
 /**
+ * Accept keys for screen accept (DTMF keys as string array)
+ */
+export const ACCEPT_KEYS = KEY_OPTIONS.map(opt => opt.value);
+
+/**
  * Callback activation keys
  */
 export const CALLBACK_ACTIVATION_KEYS = EXIT_KEYS;
@@ -251,6 +256,11 @@ export const HUNT_GROUP_CONNECT_TYPES = [
   { value: 'USER', label: 'User' },
   { value: 'GROUP', label: 'Group' },
 ] as const;
+
+/**
+ * Alias for HUNT_GROUP_CONNECT_TYPES (for backward compatibility)
+ */
+export const CONNECT_TO_OPTIONS = HUNT_GROUP_CONNECT_TYPES;
 
 /**
  * Hunt group ring strategies
@@ -436,6 +446,11 @@ export const CALLER_ID_PRESENTATION_OPTIONS = [
 ] as const;
 
 /**
+ * Alias for CALLER_ID_PRESENTATION_OPTIONS (for backward compatibility)
+ */
+export const CALLER_ID_OPTIONS = CALLER_ID_PRESENTATION_OPTIONS;
+
+/**
  * Trigger conditions for actions
  */
 export const TRIGGER_WHEN_LIST_CONNECT = [
@@ -544,6 +559,11 @@ export const STANDARD_SOBJECTS = [
   { value: 'Event', label: 'Event' },
   { value: 'User', label: 'User' },
 ] as const;
+
+/**
+ * Alias for STANDARD_SOBJECTS (for backward compatibility)
+ */
+export const SALESFORCE_OBJECTS = STANDARD_SOBJECTS;
 
 /**
  * Sort direction options

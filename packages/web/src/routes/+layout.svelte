@@ -32,7 +32,8 @@
   let sidebarOpen = $state(false);
   
   // Check if current route should be fullscreen (no sidebar/header)
-  const fullscreenRoutes = ['/policy-editor'];
+  // Note: policy-editor now uses the regular layout
+  const fullscreenRoutes: string[] = [];
   let isFullscreen = $derived(
     fullscreenRoutes.some(route => $page.url.pathname.startsWith(route))
   );

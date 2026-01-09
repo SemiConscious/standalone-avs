@@ -1,7 +1,5 @@
 import type { PageServerLoad } from './$types';
-import { hasValidCredentials, querySalesforce } from '$lib/server/salesforce';
-import { getSapienJwt, canGetSapienJwt } from '$lib/server/sapien';
-import { env } from '$env/dynamic/private';
+import { tryCreateContextAndRepositories } from '$lib/adapters';
 import { error } from '@sveltejs/kit';
 
 export interface PolicyEditorPageData {
@@ -78,72 +76,84 @@ export interface PhoneNumberData {
   number: string;
 }
 
-const NAMESPACE = env.SALESFORCE_PACKAGE_NAMESPACE || 'nbavs';
-
 export const load: PageServerLoad = async ({ params, locals }) => {
   const policyId = params.id;
 
-  if (!hasValidCredentials(locals)) {
-    // Return demo data for unauthenticated users
+  const result = tryCreateContextAndRepositories(locals);
+
+  // Not authenticated - show demo data
+  if (!result) {
+    return getDemoData(policyId);
+  }
+
+  const { repos, isDemo } = result;
+
+  if (isDemo) {
     return getDemoData(policyId);
   }
 
   try {
-    // Fetch the policy
-    const policyQuery = `
-      SELECT Id, Name, ${NAMESPACE}__Description__c, ${NAMESPACE}__Body__c, 
-             ${NAMESPACE}__Color__c, ${NAMESPACE}__Grid__c, ${NAMESPACE}__IsActive__c,
-             CreatedDate, LastModifiedDate
-      FROM ${NAMESPACE}__CallFlow__c 
-      WHERE Id = '${policyId}'
-      LIMIT 1
-    `;
-
-    const policyResult = await querySalesforce(
-      locals.instanceUrl!,
-      locals.accessToken!,
-      policyQuery
-    );
-
-    if (!policyResult.records || policyResult.records.length === 0) {
+    // Fetch the policy using repository
+    const policy = await repos.routingPolicies.findById(policyId);
+    
+    if (!policy) {
       throw error(404, 'Policy not found');
     }
 
-    const rawPolicy = policyResult.records[0];
-    
-    // Parse the policy body JSON
+    // Parse the policy body JSON if stored as string
     let body: PolicyBody = { nodes: [], edges: [] };
-    try {
-      const bodyField = rawPolicy[`${NAMESPACE}__Body__c`];
-      if (bodyField) {
-        body = JSON.parse(bodyField);
+    if (policy.body) {
+      try {
+        body = typeof policy.body === 'string' ? JSON.parse(policy.body) : policy.body as unknown as PolicyBody;
+      } catch (e) {
+        console.warn('Failed to parse policy body:', e);
       }
-    } catch (e) {
-      console.warn('Failed to parse policy body:', e);
     }
 
-    const policy: PolicyData = {
-      id: rawPolicy.Id,
-      name: rawPolicy.Name,
-      description: rawPolicy[`${NAMESPACE}__Description__c`] || '',
+    const policyData: PolicyData = {
+      id: policy.id,
+      name: policy.name,
+      description: policy.description,
       body,
-      color: rawPolicy[`${NAMESPACE}__Color__c`],
-      grid: rawPolicy[`${NAMESPACE}__Grid__c`],
-      isActive: rawPolicy[`${NAMESPACE}__IsActive__c`] || false,
-      createdDate: rawPolicy.CreatedDate,
-      lastModifiedDate: rawPolicy.LastModifiedDate,
+      color: '#3b82f6',
+      grid: true,
+      isActive: policy.status === 'active',
+      createdDate: policy.createdDate || new Date().toISOString(),
+      lastModifiedDate: policy.lastModifiedDate || new Date().toISOString(),
     };
 
-    // Fetch supporting data in parallel
-    const [users, groups, sounds, phoneNumbers] = await Promise.all([
-      fetchUsers(locals),
-      fetchGroups(locals),
-      fetchSounds(locals),
-      fetchPhoneNumbers(locals),
+    // Fetch supporting data in parallel using repositories
+    const [userResult, groupResult, soundResult, phoneResult] = await Promise.all([
+      repos.users.findAll({ page: 1, pageSize: 1000 }),
+      repos.groups.findAll({ page: 1, pageSize: 1000 }),
+      repos.sounds.findAll({ page: 1, pageSize: 1000 }),
+      repos.phoneNumbers.findAll({ page: 1, pageSize: 1000 }),
     ]);
 
+    const users: UserData[] = userResult.items.map(u => ({
+      id: u.id,
+      name: u.name,
+      email: u.email,
+    }));
+
+    const groups: GroupData[] = groupResult.items.map(g => ({
+      id: g.id,
+      name: g.name,
+    }));
+
+    const sounds: SoundData[] = soundResult.items.map(s => ({
+      id: s.id,
+      name: s.name,
+    }));
+
+    const phoneNumbers: PhoneNumberData[] = phoneResult.items.map(p => ({
+      id: p.id,
+      name: p.name,
+      number: p.number,
+    }));
+
     return {
-      policy,
+      policy: policyData,
       users,
       groups,
       sounds,
@@ -170,85 +180,6 @@ export const load: PageServerLoad = async ({ params, locals }) => {
     } satisfies PolicyEditorPageData;
   }
 };
-
-async function fetchUsers(locals: App.Locals): Promise<UserData[]> {
-  try {
-    const query = `
-      SELECT Id, Name, ${NAMESPACE}__Email__c
-      FROM ${NAMESPACE}__User__c
-      ORDER BY Name
-      LIMIT 1000
-    `;
-    const result = await querySalesforce(locals.instanceUrl!, locals.accessToken!, query);
-    return (result.records || []).map((r: Record<string, unknown>) => ({
-      id: r.Id as string,
-      name: r.Name as string,
-      email: r[`${NAMESPACE}__Email__c`] as string | undefined,
-    }));
-  } catch (e) {
-    console.warn('Failed to fetch users:', e);
-    return [];
-  }
-}
-
-async function fetchGroups(locals: App.Locals): Promise<GroupData[]> {
-  try {
-    const query = `
-      SELECT Id, Name
-      FROM ${NAMESPACE}__Group__c
-      ORDER BY Name
-      LIMIT 1000
-    `;
-    const result = await querySalesforce(locals.instanceUrl!, locals.accessToken!, query);
-    return (result.records || []).map((r: Record<string, unknown>) => ({
-      id: r.Id as string,
-      name: r.Name as string,
-    }));
-  } catch (e) {
-    console.warn('Failed to fetch groups:', e);
-    return [];
-  }
-}
-
-async function fetchSounds(locals: App.Locals): Promise<SoundData[]> {
-  try {
-    const query = `
-      SELECT Id, Name, ${NAMESPACE}__URL__c
-      FROM ${NAMESPACE}__Sound__c
-      ORDER BY Name
-      LIMIT 1000
-    `;
-    const result = await querySalesforce(locals.instanceUrl!, locals.accessToken!, query);
-    return (result.records || []).map((r: Record<string, unknown>) => ({
-      id: r.Id as string,
-      name: r.Name as string,
-      url: r[`${NAMESPACE}__URL__c`] as string | undefined,
-    }));
-  } catch (e) {
-    console.warn('Failed to fetch sounds:', e);
-    return [];
-  }
-}
-
-async function fetchPhoneNumbers(locals: App.Locals): Promise<PhoneNumberData[]> {
-  try {
-    const query = `
-      SELECT Id, Name, ${NAMESPACE}__Number__c
-      FROM ${NAMESPACE}__PhoneNumber__c
-      ORDER BY Name
-      LIMIT 1000
-    `;
-    const result = await querySalesforce(locals.instanceUrl!, locals.accessToken!, query);
-    return (result.records || []).map((r: Record<string, unknown>) => ({
-      id: r.Id as string,
-      name: r.Name as string,
-      number: r[`${NAMESPACE}__Number__c`] as string,
-    }));
-  } catch (e) {
-    console.warn('Failed to fetch phone numbers:', e);
-    return [];
-  }
-}
 
 function getDemoData(policyId: string): PolicyEditorPageData {
   return {
@@ -323,4 +254,3 @@ function getDemoData(policyId: string): PolicyEditorPageData {
     isDemo: true,
   };
 }
-

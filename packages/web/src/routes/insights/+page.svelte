@@ -1,36 +1,51 @@
 <script lang="ts">
-  import { Card, Badge } from '$lib/components/ui';
-  import { Phone, PhoneIncoming, PhoneMissed, Clock, Users, TrendingUp } from 'lucide-svelte';
+  import { Card, Badge, Button } from '$lib/components/ui';
+  import { Bot, Search, Play, FileText, BarChart3, FlaskConical, AlertCircle, Clock, TrendingUp, TrendingDown, Minus } from 'lucide-svelte';
+  import type { AIAdvisorPageData, AIInsight } from './+page.server';
 
-  interface StatCard {
-    label: string;
-    value: string;
-    change: string;
-    trend: 'up' | 'down' | 'neutral';
-    icon: typeof Phone;
+  interface Props {
+    data: AIAdvisorPageData;
   }
 
-  const stats: StatCard[] = [
-    { label: 'Total Calls', value: '2,847', change: '+12%', trend: 'up', icon: Phone },
-    { label: 'Answered', value: '2,456', change: '+8%', trend: 'up', icon: PhoneIncoming },
-    { label: 'Missed', value: '391', change: '-5%', trend: 'down', icon: PhoneMissed },
-    { label: 'Avg. Duration', value: '4m 32s', change: '+2%', trend: 'up', icon: Clock },
-  ];
+  let { data }: Props = $props();
 
-  const realtimeStats = {
-    activeCalls: 12,
-    availableAgents: 8,
-    callsInQueue: 3,
-    longestWait: '2m 15s',
-  };
+  function formatDate(dateString: string): string {
+    if (!dateString) return '';
+    return new Date(dateString).toLocaleString();
+  }
 
-  const topAgents = [
-    { name: 'John Smith', calls: 156, avgDuration: '3m 45s' },
-    { name: 'Jane Doe', calls: 142, avgDuration: '4m 12s' },
-    { name: 'Bob Johnson', calls: 128, avgDuration: '3m 58s' },
-    { name: 'Alice Williams', calls: 115, avgDuration: '4m 35s' },
-    { name: 'Charlie Brown', calls: 98, avgDuration: '3m 22s' },
-  ];
+  function getSentimentIcon(sentiment: AIInsight['sentiment']) {
+    switch (sentiment) {
+      case 'positive':
+        return TrendingUp;
+      case 'negative':
+        return TrendingDown;
+      default:
+        return Minus;
+    }
+  }
+
+  function getSentimentColor(sentiment: AIInsight['sentiment']): string {
+    switch (sentiment) {
+      case 'positive':
+        return 'text-success';
+      case 'negative':
+        return 'text-error';
+      default:
+        return 'text-text-secondary';
+    }
+  }
+
+  function getSentimentBadgeVariant(sentiment: AIInsight['sentiment']): 'success' | 'error' | 'neutral' {
+    switch (sentiment) {
+      case 'positive':
+        return 'success';
+      case 'negative':
+        return 'error';
+      default:
+        return 'neutral';
+    }
+  }
 </script>
 
 <svelte:head>
@@ -38,123 +53,130 @@
 </svelte:head>
 
 <div class="space-y-6">
-  <!-- Page Header -->
-  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-    <div>
-      <h1 class="text-2xl font-bold">Insights</h1>
-      <p class="text-text-secondary mt-1">Analytics and call statistics</p>
+  <!-- Demo Mode Banner -->
+  {#if data.isDemo}
+    <div class="bg-warning/10 border border-warning/20 text-warning rounded-base p-4 flex items-center gap-3">
+      <FlaskConical class="w-5 h-5 flex-shrink-0" />
+      <p class="text-sm">Demo Mode - showing sample data</p>
     </div>
-    <select
-      class="px-3 py-2 bg-bg-primary border border-border rounded-base text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
-    >
-      <option value="today">Today</option>
-      <option value="week">This Week</option>
-      <option value="month" selected>This Month</option>
-      <option value="quarter">This Quarter</option>
-    </select>
+  {/if}
+
+  <!-- Error Banner -->
+  {#if data.error}
+    <div class="bg-error/10 border border-error/20 text-error rounded-base p-4 flex items-center gap-3">
+      <AlertCircle class="w-5 h-5 flex-shrink-0" />
+      <p>{data.error}</p>
+    </div>
+  {/if}
+
+  <!-- Page Header -->
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-2xl font-bold text-text-primary">Insights</h1>
+      <p class="text-text-secondary mt-1">AI-powered call insights and transcription analysis</p>
+    </div>
+    <Button variant="primary" href="/insights/search">
+      <Search class="w-4 h-4 mr-2" />
+      Search Insights
+    </Button>
   </div>
 
-  <!-- Stats Grid -->
-  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-    {#each stats as stat}
-      <Card class="hover:shadow-lg transition-shadow">
-        <div class="flex items-start justify-between">
-          <div>
-            <p class="text-sm text-text-secondary">{stat.label}</p>
-            <p class="text-2xl font-bold mt-1">{stat.value}</p>
-          </div>
-          <div class="p-2 bg-accent/10 rounded-base">
-            <svelte:component this={stat.icon} class="w-5 h-5 text-accent" />
-          </div>
-        </div>
-        <div class="mt-3 flex items-center gap-1">
-          <Badge
-            variant={stat.trend === 'up' ? 'success' : stat.trend === 'down' ? 'error' : 'neutral'}
-            size="sm"
-          >
-            {stat.change}
-          </Badge>
-          <span class="text-xs text-text-secondary">vs last period</span>
-        </div>
-      </Card>
-    {/each}
-  </div>
-
-  <!-- Two Column Layout -->
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-    <!-- Real-time Stats -->
+  <!-- Stats Overview -->
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
     <Card>
-      {#snippet header()}
-        <div class="flex items-center gap-2">
-          <div class="w-2 h-2 bg-success rounded-full animate-pulse"></div>
-          <h2 class="font-semibold">Real-time</h2>
+      <div class="flex items-center gap-3">
+        <div class="p-3 bg-primary-500/10 rounded-base">
+          <Bot class="w-6 h-6 text-text-primary" />
         </div>
-      {/snippet}
-
-      <div class="grid grid-cols-2 gap-4">
-        <div class="p-4 bg-bg-secondary rounded-base">
-          <p class="text-sm text-text-secondary">Active Calls</p>
-          <p class="text-3xl font-bold text-accent mt-1">{realtimeStats.activeCalls}</p>
-        </div>
-        <div class="p-4 bg-bg-secondary rounded-base">
-          <p class="text-sm text-text-secondary">Available Agents</p>
-          <p class="text-3xl font-bold text-success mt-1">{realtimeStats.availableAgents}</p>
-        </div>
-        <div class="p-4 bg-bg-secondary rounded-base">
-          <p class="text-sm text-text-secondary">Calls in Queue</p>
-          <p class="text-3xl font-bold text-warning mt-1">{realtimeStats.callsInQueue}</p>
-        </div>
-        <div class="p-4 bg-bg-secondary rounded-base">
-          <p class="text-sm text-text-secondary">Longest Wait</p>
-          <p class="text-3xl font-bold mt-1">{realtimeStats.longestWait}</p>
+        <div>
+          <p class="text-2xl font-bold text-text-primary">{data.stats.totalInsights.toLocaleString()}</p>
+          <p class="text-sm text-text-secondary">Total Insights</p>
         </div>
       </div>
     </Card>
-
-    <!-- Top Performers -->
     <Card>
-      {#snippet header()}
-        <div class="flex items-center gap-2">
-          <TrendingUp class="w-5 h-5 text-accent" />
-          <h2 class="font-semibold">Top Performers</h2>
+      <div class="flex items-center gap-3">
+        <div class="p-3 bg-success/10 rounded-base">
+          <FileText class="w-6 h-6 text-success" />
         </div>
-      {/snippet}
+        <div>
+          <p class="text-2xl font-bold text-text-primary">{data.stats.transcriptions.toLocaleString()}</p>
+          <p class="text-sm text-text-secondary">Transcriptions</p>
+        </div>
+      </div>
+    </Card>
+    <Card>
+      <div class="flex items-center gap-3">
+        <div class="p-3 bg-warning/10 rounded-base">
+          <Play class="w-6 h-6 text-warning" />
+        </div>
+        <div>
+          <p class="text-2xl font-bold text-text-primary">{data.stats.processing}</p>
+          <p class="text-sm text-text-secondary">Processing</p>
+        </div>
+      </div>
+    </Card>
+    <Card>
+      <div class="flex items-center gap-3">
+        <div class="p-3 bg-accent/10 rounded-base">
+          <BarChart3 class="w-6 h-6 text-text-primary" />
+        </div>
+        <div>
+          <p class="text-2xl font-bold text-text-primary">{data.stats.avgSentimentScore}%</p>
+          <p class="text-sm text-text-secondary">Avg Sentiment</p>
+        </div>
+      </div>
+    </Card>
+  </div>
 
-      <div class="space-y-3">
-        {#each topAgents as agent, index}
-          <div
-            class="flex items-center justify-between p-3 bg-bg-secondary rounded-base"
-          >
-            <div class="flex items-center gap-3">
-              <span
-                class="w-6 h-6 rounded-full bg-accent/10 text-accent text-sm font-medium flex items-center justify-center"
-              >
-                {index + 1}
-              </span>
-              <div>
-                <p class="font-medium">{agent.name}</p>
-                <p class="text-sm text-text-secondary">{agent.calls} calls</p>
+  <!-- Recent Insights -->
+  <Card>
+    <h2 class="text-lg font-semibold text-text-primary mb-4">Recent AI Insights</h2>
+    {#if data.recentInsights.length > 0}
+      <div class="space-y-4">
+        {#each data.recentInsights as insight}
+          {@const SentimentIcon = getSentimentIcon(insight.sentiment)}
+          <a href="/insights/{insight.id}" class="block p-4 bg-bg-secondary rounded-base border border-border hover:border-primary-500/50 transition-colors">
+            <div class="flex items-start justify-between gap-4">
+              <div class="flex-1">
+                <div class="flex items-center gap-2 mb-2 flex-wrap">
+                  <span class="font-medium text-text-primary">
+                    {insight.name}
+                  </span>
+                  <Badge variant={getSentimentBadgeVariant(insight.sentiment)}>
+                    <SentimentIcon class="w-3 h-3 mr-1" />
+                    {insight.sentiment}
+                  </Badge>
+                  {#if insight.transcriptStatus === 'Processing'}
+                    <Badge variant="warning">Processing</Badge>
+                  {/if}
+                </div>
+                <p class="text-sm text-text-secondary line-clamp-2">{insight.summary}</p>
+                <div class="flex items-center gap-4 mt-2 text-xs text-text-secondary">
+                  <span class="flex items-center gap-1">
+                    <Clock class="w-3 h-3" />
+                    {formatDate(insight.createdDate)}
+                  </span>
+                  {#if insight.score > 0}
+                    <span>Score: {insight.score}%</span>
+                  {/if}
+                </div>
               </div>
+              {#if insight.transcriptStatus === 'Completed'}
+                <Button variant="ghost" size="sm" href="/call-logs?uuid={insight.uuid}" onclick={(e: MouseEvent) => e.stopPropagation()}>
+                  <Play class="w-4 h-4" />
+                </Button>
+              {/if}
             </div>
-            <div class="text-right">
-              <p class="text-sm font-medium">{agent.avgDuration}</p>
-              <p class="text-xs text-text-secondary">avg. duration</p>
-            </div>
-          </div>
+          </a>
         {/each}
       </div>
-    </Card>
-  </div>
-
-  <!-- Call Distribution Chart Placeholder -->
-  <Card>
-    {#snippet header()}
-      <h2 class="font-semibold">Call Distribution</h2>
-    {/snippet}
-
-    <div class="h-64 flex items-center justify-center bg-bg-secondary rounded-base">
-      <p class="text-text-secondary">Chart visualization coming soon</p>
-    </div>
+    {:else}
+      <div class="text-center py-12 text-text-secondary">
+        <Bot class="w-12 h-12 mx-auto mb-4 opacity-50" />
+        <p>No AI Insights available yet.</p>
+        <p class="text-sm mt-2">Insights insights will appear here once calls are processed.</p>
+      </div>
+    {/if}
   </Card>
 </div>
-

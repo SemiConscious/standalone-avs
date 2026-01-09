@@ -46,7 +46,7 @@
   <Card>
     {#snippet header()}
       <div class="flex items-center gap-2">
-        <Smartphone class="w-5 h-5 text-accent" />
+        <Smartphone class="w-5 h-5 text-text-primary" />
         <h2 class="font-semibold">Two-Factor Authentication</h2>
       </div>
     {/snippet}
@@ -80,7 +80,7 @@
   <Card>
     {#snippet header()}
       <div class="flex items-center gap-2">
-        <Clock class="w-5 h-5 text-accent" />
+        <Clock class="w-5 h-5 text-text-primary" />
         <h2 class="font-semibold">Session Settings</h2>
       </div>
     {/snippet}
@@ -111,7 +111,7 @@
         <input
           type="checkbox"
           bind:checked={ipRestrictions}
-          class="w-5 h-5 rounded border-border text-accent focus:ring-accent"
+          class="w-5 h-5 rounded border-border text-text-primary focus:ring-accent"
         />
       </label>
     </div>
@@ -122,7 +122,7 @@
     {#snippet header()}
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-2">
-          <Key class="w-5 h-5 text-accent" />
+          <Key class="w-5 h-5 text-text-primary" />
           <h2 class="font-semibold">Active Sessions</h2>
         </div>
         <Button variant="ghost" size="sm" class="text-error">
