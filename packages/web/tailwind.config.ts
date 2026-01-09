@@ -28,7 +28,7 @@ export default {
         // Status colors
         'success': 'rgb(34, 197, 94)',
         'warning': 'rgb(251, 191, 36)',
-        'error': 'rgb(239, 68, 68)',
+        'error': 'rgb(255, 60, 60)',
       },
     },
   },
