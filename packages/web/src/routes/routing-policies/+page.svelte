@@ -218,7 +218,7 @@
             <a
               href="/policy-editor/{row.id}"
               onclick={(e) => e.stopPropagation()}
-              class="text-primary-400 hover:text-primary-300"
+              class="text-text-primary hover:text-primary-300"
               title="Edit Policy"
             >
               <Edit class="w-3.5 h-3.5" />
@@ -229,7 +229,7 @@
                 e.stopPropagation();
                 handleToggleStatus(String(row.id), String(row.status));
               }}
-              class="text-primary-400 hover:text-primary-300 text-xs"
+              class="text-text-primary hover:text-primary-300 text-xs"
               disabled={data.isDemo}
               title={row.status === 'Enabled' ? 'Disable Policy' : 'Enable Policy'}
             >
@@ -261,7 +261,7 @@
                   e.stopPropagation();
                   showDeleteConfirm = String(row.id);
                 }}
-                class="text-primary-400 hover:text-primary-300"
+                class="text-text-primary hover:text-primary-300"
                 disabled={data.isDemo}
                 title="Delete Policy"
               >
@@ -270,7 +270,7 @@
             {/if}
           </div>
         {:else if column.key === 'name'}
-          <span class="text-primary-400 font-medium">{row.name}</span>
+          <span class="text-text-primary font-medium">{row.name}</span>
         {:else if column.key === 'source'}
           <Badge variant={row.source === 'Inbound' ? 'accent' : 'neutral'}>
             {row.source}

@@ -83,10 +83,10 @@
     <Card>
       <div class="flex items-center gap-3">
         <div class="p-3 bg-primary-500/10 rounded-base">
-          <Phone class="w-6 h-6 text-primary-400" />
+          <Phone class="w-6 h-6 text-text-primary" />
         </div>
         <div>
-          <p class="text-2xl font-bold">{data.stats.totalCalls.toLocaleString()}</p>
+          <p class="text-2xl font-bold text-text-primary">{data.stats.totalCalls.toLocaleString()}</p>
           <p class="text-sm text-text-secondary">Total Calls (This Month)</p>
         </div>
       </div>
@@ -101,7 +101,7 @@
           {/if}
         </div>
         <div>
-          <p class="text-2xl font-bold">
+          <p class="text-2xl font-bold text-text-primary">
             {data.stats.changeFromLastMonth >= 0 ? '+' : ''}{data.stats.changeFromLastMonth}%
           </p>
           <p class="text-sm text-text-secondary">vs Last Month</p>
@@ -114,18 +114,18 @@
           <PieChart class="w-6 h-6 text-warning" />
         </div>
         <div>
-          <p class="text-2xl font-bold">{data.stats.avgDuration}</p>
+          <p class="text-2xl font-bold text-text-primary">{data.stats.avgDuration}</p>
           <p class="text-sm text-text-secondary">Avg Call Duration</p>
         </div>
       </div>
     </Card>
     <Card>
       <div class="flex items-center gap-3">
-        <div class="p-3 bg-purple-500/10 rounded-base">
-          <ClipboardList class="w-6 h-6 text-purple-500" />
+        <div class="p-3 bg-accent/10 rounded-base">
+          <ClipboardList class="w-6 h-6 text-text-primary" />
         </div>
         <div>
-          <p class="text-2xl font-bold">{data.stats.answerRate}%</p>
+          <p class="text-2xl font-bold text-text-primary">{data.stats.answerRate}%</p>
           <p class="text-sm text-text-secondary">Answer Rate</p>
         </div>
       </div>
@@ -156,7 +156,7 @@
     <Card>
       <div class="flex items-center gap-3">
         <div class="p-2 bg-primary-500/10 rounded-base">
-          <PhoneOutgoing class="w-5 h-5 text-primary-400" />
+          <PhoneOutgoing class="w-5 h-5 text-text-primary" />
         </div>
         <div class="flex-1">
           <div class="flex items-center justify-between">
@@ -174,8 +174,8 @@
     </Card>
     <Card>
       <div class="flex items-center gap-3">
-        <div class="p-2 bg-purple-500/10 rounded-base">
-          <ArrowLeftRight class="w-5 h-5 text-purple-500" />
+        <div class="p-2 bg-accent/10 rounded-base">
+          <ArrowLeftRight class="w-5 h-5 text-text-primary" />
         </div>
         <div class="flex-1">
           <div class="flex items-center justify-between">
@@ -216,7 +216,7 @@
             {href}
             class="p-4 border border-border rounded-base hover:border-primary-500/50 transition-colors text-left block"
           >
-            <ReportIcon class="w-6 h-6 text-primary-400 mb-2" />
+            <ReportIcon class="w-6 h-6 text-text-primary mb-2" />
             <h3 class="font-medium text-text-primary">{report.name}</h3>
             <p class="text-sm text-text-secondary">{report.description}</p>
           </a>

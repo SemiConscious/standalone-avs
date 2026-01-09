@@ -1,203 +1,114 @@
-import { querySalesforce, hasValidCredentials } from '$lib/server/salesforce';
-import { env } from '$env/dynamic/private';
+/**
+ * Groups List Page Server
+ * 
+ * Uses repository pattern for platform-agnostic data loading.
+ */
+
 import type { PageServerLoad, Actions } from './$types';
 import { fail } from '@sveltejs/kit';
+import { createAdapterContext, getRepositories } from '$lib/adapters';
+import type { Group, PaginationMeta } from '$lib/domain';
 
-interface SalesforceGroup {
-  Id: string;
-  Name: string;
-  nbavs__Id__c: number;
-  nbavs__Description__c: string;
-  nbavs__Email__c: string;
-  nbavs__Extension__c: string;
-  nbavs__GroupPickup__c: string;
-  nbavs__PBX__c: boolean;
-  nbavs__Manager__c: boolean;
-  nbavs__Record__c: boolean;
-  LastModifiedDate: string;
+export type { Group };
+
+export interface GroupsPageData {
+  groups: Group[];
+  pagination: PaginationMeta;
+  isDemo: boolean;
+  error?: string;
 }
 
-export interface Group {
-  id: string;
-  apiId: number;
-  name: string;
-  email: string;
-  extension: string;
-  groupPickup: string;
-  description: string;
-  pbx: boolean;
-  manager: boolean;
-  record: boolean;
-  lastModified: string;
-  memberCount?: number;
+function parseQueryParams(url: URL) {
+  const page = parseInt(url.searchParams.get('page') || '1', 10);
+  const pageSize = parseInt(url.searchParams.get('pageSize') || '25', 10);
+  const sortBy = url.searchParams.get('sortBy') || 'name';
+  const sortOrder = (url.searchParams.get('sortOrder') || 'asc') as 'asc' | 'desc';
+  const search = url.searchParams.get('search') || undefined;
+
+  return {
+    page: Math.max(1, page),
+    pageSize: Math.min(100, Math.max(1, pageSize)),
+    sortBy,
+    sortOrder,
+    search,
+  };
 }
 
-// Demo data
-const DEMO_GROUPS: Group[] = [
-  {
-    id: '1',
-    apiId: 101,
-    name: 'Sales Team',
-    email: 'sales@company.com',
-    extension: '2001',
-    groupPickup: '*61',
-    description: 'Main sales department ring group',
-    pbx: true,
-    manager: true,
-    record: true,
-    lastModified: '2026-01-05T10:30:00Z',
-    memberCount: 8,
-  },
-  {
-    id: '2',
-    apiId: 102,
-    name: 'Customer Support',
-    email: 'support@company.com',
-    extension: '2002',
-    groupPickup: '*62',
-    description: 'Support queue for customer inquiries',
-    pbx: true,
-    manager: true,
-    record: true,
-    lastModified: '2026-01-04T14:20:00Z',
-    memberCount: 12,
-  },
-  {
-    id: '3',
-    apiId: 103,
-    name: 'Technical Support',
-    email: 'tech@company.com',
-    extension: '2003',
-    groupPickup: '*63',
-    description: 'Technical support hunt group',
-    pbx: true,
-    manager: false,
-    record: true,
-    lastModified: '2026-01-03T09:15:00Z',
-    memberCount: 5,
-  },
-  {
-    id: '4',
-    apiId: 104,
-    name: 'After Hours',
-    email: 'afterhours@company.com',
-    extension: '2004',
-    groupPickup: '*64',
-    description: 'After hours support team',
-    pbx: false,
-    manager: false,
-    record: false,
-    lastModified: '2026-01-02T16:45:00Z',
-    memberCount: 3,
-  },
-  {
-    id: '5',
-    apiId: 105,
-    name: 'Reception',
-    email: 'reception@company.com',
-    extension: '2005',
-    groupPickup: '*65',
-    description: 'Front desk and reception',
-    pbx: true,
-    manager: true,
-    record: false,
-    lastModified: '2026-01-01T11:00:00Z',
-    memberCount: 2,
-  },
-];
-
-export const load: PageServerLoad = async ({ locals }) => {
-  // Demo mode
-  if (env.PUBLIC_DEMO_MODE === 'true' || env.PUBLIC_DEMO_MODE === '1') {
-    return { groups: DEMO_GROUPS, isDemo: true, totalCount: DEMO_GROUPS.length };
-  }
-
-  // Check credentials
-  if (!hasValidCredentials(locals)) {
-    return { groups: [], isDemo: false, totalCount: 0, error: 'Not authenticated' };
+export const load: PageServerLoad<GroupsPageData> = async ({ locals, url }) => {
+  let ctx;
+  try {
+    ctx = createAdapterContext(locals);
+  } catch {
+    return {
+      groups: [],
+      pagination: {
+        page: 1,
+        pageSize: 25,
+        totalItems: 0,
+        totalPages: 0,
+        hasPreviousPage: false,
+        hasNextPage: false,
+      },
+      isDemo: false,
+      error: 'Not authenticated',
+    };
   }
 
   try {
-    // Fetch groups with all relevant fields
-    const soql = `
-      SELECT Id, nbavs__Id__c, Name, nbavs__Description__c, nbavs__Email__c,
-             nbavs__Extension__c, nbavs__GroupPickup__c, nbavs__PBX__c,
-             nbavs__Manager__c, nbavs__Record__c, LastModifiedDate
-      FROM nbavs__Group__c
-      ORDER BY LastModifiedDate DESC
-      LIMIT 2000
-    `;
+    const { groups: groupRepo } = getRepositories(ctx);
+    const params = parseQueryParams(url);
+    const result = await groupRepo.findAll(params);
 
-    const result = await querySalesforce<SalesforceGroup>(
-      locals.instanceUrl!,
-      locals.accessToken!,
-      soql
-    );
-
-    // Fetch member counts for each group
-    const memberCountsSoql = `
-      SELECT nbavs__Group__c, COUNT(Id) cnt
-      FROM nbavs__GroupMember__c
-      GROUP BY nbavs__Group__c
-    `;
-
-    interface MemberCountResult {
-      nbavs__Group__c: string;
-      cnt: number;
-    }
-
-    let memberCountMap = new Map<string, number>();
-    try {
-      const memberCountsResult = await querySalesforce<MemberCountResult>(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        memberCountsSoql
-      );
-      memberCountsResult.records.forEach((r) => {
-        memberCountMap.set(r.nbavs__Group__c, r.cnt);
-      });
-    } catch (e) {
-      console.warn('Failed to fetch member counts:', e);
-    }
-
-    const groups: Group[] = result.records.map((sfGroup) => ({
-      id: sfGroup.Id,
-      apiId: sfGroup.nbavs__Id__c || 0,
-      name: sfGroup.Name,
-      email: sfGroup.nbavs__Email__c || '',
-      extension: sfGroup.nbavs__Extension__c || '',
-      groupPickup: sfGroup.nbavs__GroupPickup__c || '',
-      description: sfGroup.nbavs__Description__c || '',
-      pbx: sfGroup.nbavs__PBX__c || false,
-      manager: sfGroup.nbavs__Manager__c || false,
-      record: sfGroup.nbavs__Record__c || false,
-      lastModified: sfGroup.LastModifiedDate,
-      memberCount: memberCountMap.get(sfGroup.Id) || 0,
-    }));
-
-    return { groups, isDemo: false, totalCount: result.totalSize };
+    return {
+      groups: result.items,
+      pagination: result.pagination,
+      isDemo: ctx.platform === 'demo',
+    };
   } catch (error) {
     console.error('Failed to fetch groups:', error);
-    return { groups: [], isDemo: false, totalCount: 0, error: 'Failed to load groups' };
+    return {
+      groups: [],
+      pagination: {
+        page: 1,
+        pageSize: 25,
+        totalItems: 0,
+        totalPages: 0,
+        hasPreviousPage: false,
+        hasNextPage: false,
+      },
+      isDemo: ctx.platform === 'demo',
+      error: error instanceof Error ? error.message : 'Failed to load groups',
+    };
   }
 };
 
-// Actions for delete
 export const actions: Actions = {
   delete: async ({ locals, request }) => {
-    if (!hasValidCredentials(locals)) {
+    let ctx;
+    try {
+      ctx = createAdapterContext(locals);
+    } catch {
       return fail(401, { error: 'Not authenticated' });
     }
 
     const formData = await request.formData();
-    const groupId = formData.get('groupId') as string;
+    const groupId = formData.get('groupId')?.toString();
 
     if (!groupId) {
       return fail(400, { error: 'Group ID is required' });
     }
 
-    // In a real implementation, this would call the Sapien API to delete the group
-    // and then delete from Salesforce
-    return { success: true, message: 'Group deleted successfully' };
+    try {
+      const { groups: groupRepo } = getRepositories(ctx);
+      const result = await groupRepo.delete(groupId);
+
+      if (!result.success) {
+        return fail(500, { error: result.error || 'Failed to delete group' });
+      }
+
+      return { success: true, message: 'Group deleted successfully' };
+    } catch (error) {
+      return fail(500, { error: error instanceof Error ? error.message : 'Failed to delete group' });
+    }
   },
 };

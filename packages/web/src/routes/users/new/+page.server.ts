@@ -1,17 +1,6 @@
 import type { Actions } from './$types';
-import { hasValidCredentials, createSalesforce, querySalesforce } from '$lib/server/salesforce';
-import { fail } from '@sveltejs/kit';
-import { env } from '$env/dynamic/private';
-import { redirect } from '@sveltejs/kit';
-import {
-  canUseSapienApi,
-  getSapienAccessToken,
-  getSapienHost,
-  getOrganizationId,
-} from '$lib/server/gatekeeper';
-import { sapienRequest } from '$lib/server/sapien';
-
-const NAMESPACE = env.SALESFORCE_PACKAGE_NAMESPACE || 'nbavs';
+import { tryCreateContextAndRepositories } from '$lib/adapters';
+import { fail, redirect } from '@sveltejs/kit';
 
 // Extension validation constants
 const EXTENSION_MIN = 1000;
@@ -19,8 +8,14 @@ const EXTENSION_MAX = 9999;
 
 export const actions: Actions = {
   create: async ({ locals, request }) => {
-    if (!hasValidCredentials(locals)) {
+    const result = tryCreateContextAndRepositories(locals);
+    if (!result) {
       return fail(401, { error: 'Not authenticated' });
+    }
+
+    const { repos, isDemo } = result;
+    if (isDemo) {
+      return fail(400, { error: 'Not available in demo mode' });
     }
 
     const formData = await request.formData();
@@ -55,23 +50,9 @@ export const actions: Actions = {
 
       // Check for duplicate extension
       try {
-        const duplicateCheck = await querySalesforce<{ Id: string }>(
-          locals.instanceUrl!,
-          locals.accessToken!,
-          `SELECT Id FROM ${NAMESPACE}__User__c WHERE ${NAMESPACE}__SipExtension__c = '${extension}' LIMIT 1`
-        );
-        if (duplicateCheck.records.length > 0) {
-          errors.push('Extension is already in use by another user');
-        }
-
-        // Also check groups
-        const groupDuplicateCheck = await querySalesforce<{ Id: string }>(
-          locals.instanceUrl!,
-          locals.accessToken!,
-          `SELECT Id FROM ${NAMESPACE}__Group__c WHERE ${NAMESPACE}__Extension__c = '${extension}' LIMIT 1`
-        );
-        if (groupDuplicateCheck.records.length > 0) {
-          errors.push('Extension is already in use by a group');
+        const isUserExtAvailable = await repos.users.isExtensionAvailable(extension);
+        if (!isUserExtAvailable) {
+          errors.push('Extension is already in use');
         }
       } catch (e) {
         console.warn('Failed to check extension uniqueness:', e);
@@ -83,59 +64,23 @@ export const actions: Actions = {
     }
 
     try {
-      // Build create payload
-      const createData: Record<string, unknown> = {
-        [`${NAMESPACE}__FirstName__c`]: firstName,
-        [`${NAMESPACE}__LastName__c`]: lastName,
-        [`${NAMESPACE}__Username__c`]: username || email,
-        [`${NAMESPACE}__SipExtension__c`]: extension || null,
-        [`${NAMESPACE}__MobilePhone__c`]: mobilePhone || null,
-        [`${NAMESPACE}__Enabled__c`]: enabled,
-        [`${NAMESPACE}__PermissionLevel__c`]: permissionLevel,
-      };
+      const createResult = await repos.users.create({
+        firstName,
+        lastName,
+        username: username || email,
+        email: email || username,
+        extension: extension || undefined,
+        mobilePhone: mobilePhone || undefined,
+        enabled,
+        permissionLevel,
+      });
 
-      // Create in Salesforce
-      const result = await createSalesforce(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        `${NAMESPACE}__User__c`,
-        createData
-      );
-
-      // Optionally create in Sapien if API is available
-      if (result.success && result.id && canUseSapienApi(locals)) {
-        try {
-          const sapienToken = await getSapienAccessToken(locals.instanceUrl!, locals.accessToken!);
-          const sapienHost = getSapienHost();
-          const organizationId = getOrganizationId();
-
-          if (sapienHost && organizationId) {
-            await sapienRequest(
-              sapienHost,
-              sapienToken,
-              'POST',
-              `/v1/users/${organizationId}`,
-              {
-                firstName,
-                lastName,
-                username: username || email,
-                sipExtension: extension || undefined,
-                mobilePhone: mobilePhone || undefined,
-                enabled,
-              }
-            );
-
-            // Update Salesforce record with Sapien ID if returned
-            // (This would require the Sapien API to return the ID)
-          }
-        } catch (sapienError) {
-          console.warn('Failed to create user in Sapien:', sapienError);
-          // Don't fail the request - Salesforce creation succeeded
-        }
+      if (!createResult.success) {
+        return fail(500, { error: createResult.error || 'Failed to create user' });
       }
 
       // Redirect to the new user's detail page
-      throw redirect(303, `/users/${result.id}`);
+      redirect(303, `/users/${createResult.data!.id}`);
     } catch (e) {
       if ((e as { status?: number }).status === 303) {
         throw e; // Re-throw redirects

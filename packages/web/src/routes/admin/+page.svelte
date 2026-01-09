@@ -172,7 +172,7 @@
         <Card>
           {#snippet header()}
             <div class="flex items-center gap-2">
-              <BarChart3 class="w-4 h-4 text-primary-400" />
+              <BarChart3 class="w-4 h-4 text-text-primary" />
               <h3 class="font-semibold text-sm text-text-primary">Assets</h3>
             </div>
           {/snippet}
@@ -184,10 +184,10 @@
                   <div class="w-6 h-6 {item.bgColor} rounded flex items-center justify-center flex-shrink-0">
                     <svelte:component this={item.icon} class="w-3 h-3 text-white" />
                   </div>
-                  <a href={item.href} class="text-primary-400 hover:text-primary-300 hover:underline text-sm">{item.label}</a>
+                  <a href={item.href} class="text-text-primary hover:text-primary-300 hover:underline text-sm">{item.label}</a>
                 </div>
                 <div class="flex items-center gap-2">
-                  <span class="text-text-primary font-medium text-sm">{item.value.toLocaleString()}</span>
+                  <span class="text-text-primary font-medium text-sm">{(item.value ?? 0).toLocaleString()}</span>
                   <a 
                     href="{item.href}/new" 
                     class="w-5 h-5 bg-success rounded flex items-center justify-center hover:bg-green-600 transition-colors"
@@ -205,7 +205,7 @@
         <Card>
           {#snippet header()}
             <div class="flex items-center gap-2">
-              <Activity class="w-4 h-4 text-primary-400" />
+              <Activity class="w-4 h-4 text-text-primary" />
               <h3 class="font-semibold text-sm text-text-primary">Monitoring</h3>
             </div>
           {/snippet}
@@ -216,7 +216,7 @@
                 <div class="w-6 h-6 bg-green-500 rounded flex items-center justify-center">
                   <Shield class="w-3 h-3 text-white" />
                 </div>
-                <span class="text-primary-400 hover:text-primary-300 text-sm">Recording Access</span>
+                <span class="text-text-primary hover:text-primary-300 text-sm">Recording Access</span>
               </div>
               <span class="text-text-secondary text-sm">{adminData.monitoring.recordingAccessCount}</span>
             </a>
@@ -226,7 +226,7 @@
                 <div class="w-6 h-6 bg-blue-500 rounded flex items-center justify-center">
                   <FileText class="w-3 h-3 text-white" />
                 </div>
-                <span class="text-primary-400 hover:text-primary-300 text-sm">Event Logs</span>
+                <span class="text-text-primary hover:text-primary-300 text-sm">Event Logs</span>
               </div>
               <span class="text-text-secondary text-sm">{adminData.monitoring.eventLogsToday} today</span>
             </a>
@@ -236,7 +236,7 @@
                 <div class="w-6 h-6 bg-red-500 rounded flex items-center justify-center">
                   <AlertCircle class="w-3 h-3 text-white" />
                 </div>
-                <span class="text-primary-400 hover:text-primary-300 text-sm">Error Logs</span>
+                <span class="text-text-primary hover:text-primary-300 text-sm">Error Logs</span>
               </div>
               <span class="{adminData.monitoring.errorLogsToday > 0 ? 'text-error' : 'text-success'} text-sm">
                 {adminData.monitoring.errorLogsToday} today
@@ -250,7 +250,7 @@
           {#snippet header()}
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-2">
-                <RefreshCw class="w-4 h-4 text-primary-400" />
+                <RefreshCw class="w-4 h-4 text-text-primary" />
                 <h3 class="font-semibold text-sm text-text-primary">Jobs</h3>
               </div>
               <Badge variant="success" size="sm">{adminData.jobsRunning} running</Badge>
@@ -284,7 +284,7 @@
         {#snippet header()}
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2">
-              <FileText class="w-4 h-4 text-primary-400" />
+              <FileText class="w-4 h-4 text-text-primary" />
               <h3 class="font-semibold text-sm text-text-primary">Subscriptions</h3>
             </div>
             <div class="flex items-center gap-2">
@@ -346,7 +346,7 @@
         {#snippet header()}
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2">
-              <HelpCircle class="w-4 h-4 text-primary-400" />
+              <HelpCircle class="w-4 h-4 text-text-primary" />
               <h3 class="font-semibold text-sm text-text-primary">Help & Support</h3>
             </div>
             <a 
@@ -365,7 +365,7 @@
           <div class="p-3 bg-bg-secondary rounded-lg">
             <p class="text-sm text-text-primary">
               <span class="text-text-secondary">Salesforce Organization ID:</span>
-              <code class="font-mono text-primary-400 bg-bg-tertiary px-2 py-1 rounded text-xs ml-2">
+              <code class="font-mono text-text-primary bg-bg-tertiary px-2 py-1 rounded text-xs ml-2">
                 {adminData.organizationId}
               </code>
             </p>

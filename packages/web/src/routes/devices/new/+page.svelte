@@ -75,7 +75,7 @@
       <Card>
         {#snippet header()}
           <div class="flex items-center gap-2">
-            <Monitor class="w-4 h-4 text-accent" />
+            <Monitor class="w-4 h-4 text-text-primary" />
             <h2 class="font-semibold text-text-primary text-sm">Device Information</h2>
           </div>
         {/snippet}
@@ -141,7 +141,7 @@
                 type="checkbox"
                 name="enabled_checkbox"
                 bind:checked={enabled}
-                class="w-4 h-4 rounded border-border text-accent focus:ring-accent"
+                class="w-4 h-4 rounded border-border text-text-primary focus:ring-accent"
               />
               <span class="text-sm font-medium text-text-primary">Device Enabled</span>
             </label>
@@ -155,7 +155,7 @@
       <Card>
         {#snippet header()}
           <div class="flex items-center gap-2">
-            <Settings class="w-4 h-4 text-accent" />
+            <Settings class="w-4 h-4 text-text-primary" />
             <h2 class="font-semibold text-text-primary text-sm">Technical Details</h2>
           </div>
         {/snippet}

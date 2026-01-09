@@ -267,7 +267,7 @@
         </div>
 
         <div class="mt-4 p-2.5 bg-surface-700 border border-surface-600 rounded-lg flex items-start gap-2">
-          <Info class="w-3.5 h-3.5 text-primary-400 mt-0.5 flex-shrink-0" />
+          <Info class="w-3.5 h-3.5 text-text-primary mt-0.5 flex-shrink-0" />
           <p class="text-xs text-text-secondary">
             Once a purpose is set, it cannot be removed. Members must have the corresponding licenses.
           </p>

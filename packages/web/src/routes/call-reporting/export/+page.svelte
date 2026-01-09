@@ -189,7 +189,7 @@
   <div class="flex items-start justify-between gap-4">
     <div>
       <nav class="text-sm text-text-secondary mb-2">
-        <a href="/call-reporting" class="hover:text-primary-400 inline-flex items-center gap-1">
+        <a href="/call-reporting" class="hover:text-text-primary inline-flex items-center gap-1">
           <ArrowLeft class="w-4 h-4" />
           Back to Call Reporting
         </a>
@@ -205,7 +205,7 @@
       <!-- Date Range -->
       <Card>
         <h2 class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-          <Calendar class="w-5 h-5 text-primary-400" />
+          <Calendar class="w-5 h-5 text-text-primary" />
           Date Range
         </h2>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -233,7 +233,7 @@
       <!-- Filters -->
       <Card>
         <h2 class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-          <Filter class="w-5 h-5 text-primary-400" />
+          <Filter class="w-5 h-5 text-text-primary" />
           Filters
         </h2>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -263,7 +263,7 @@
       <Card>
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-lg font-semibold text-text-primary flex items-center gap-2">
-            <Columns class="w-5 h-5 text-primary-400" />
+            <Columns class="w-5 h-5 text-text-primary" />
             Select Fields
           </h2>
           <div class="flex gap-2">
@@ -280,7 +280,7 @@
             <button
               type="button"
               onclick={() => toggleField(field.key)}
-              class="p-3 rounded-base border text-left transition-colors flex items-center gap-2 {selectedFields.includes(field.key) ? 'bg-primary-500/20 border-primary-400 text-primary-400' : 'border-border hover:border-primary-400 text-text-secondary'}"
+              class="p-3 rounded-base border text-left transition-colors flex items-center gap-2 {selectedFields.includes(field.key) ? 'bg-primary-500/20 border-primary-400 text-text-primary' : 'border-border hover:border-primary-400 text-text-secondary'}"
             >
               {#if selectedFields.includes(field.key)}
                 <Check class="w-4 h-4 flex-shrink-0" />
@@ -301,7 +301,7 @@
     <div class="space-y-6">
       <Card>
         <h2 class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-          <FileSpreadsheet class="w-5 h-5 text-primary-400" />
+          <FileSpreadsheet class="w-5 h-5 text-text-primary" />
           Export Options
         </h2>
         

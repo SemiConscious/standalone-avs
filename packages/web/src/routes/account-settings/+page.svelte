@@ -482,7 +482,7 @@
         <Card>
           {#snippet header()}
             <div class="flex items-center gap-2">
-              <Settings class="w-4 h-4 text-primary-400" />
+              <Settings class="w-4 h-4 text-text-primary" />
               <h3 class="font-semibold text-text-primary">Core Settings</h3>
             </div>
           {/snippet}
@@ -581,7 +581,7 @@
           <Card>
             {#snippet header()}
               <div class="flex items-center gap-2">
-                <Monitor class="w-4 h-4 text-primary-400" />
+                <Monitor class="w-4 h-4 text-text-primary" />
                 <h3 class="font-semibold text-text-primary">UI Settings</h3>
               </div>
             {/snippet}
@@ -603,7 +603,7 @@
           <Card>
             {#snippet header()}
               <div class="flex items-center gap-2">
-                <Cog class="w-4 h-4 text-primary-400" />
+                <Cog class="w-4 h-4 text-text-primary" />
                 <h3 class="font-semibold text-text-primary">General Settings</h3>
               </div>
             {/snippet}
@@ -643,7 +643,7 @@
             onclick={() => toggleSection('cti', telephonyOpen, v => telephonyOpen = v)}
           >
             <div class="flex items-center gap-2">
-              <Phone class="w-4 h-4 text-primary-400" />
+              <Phone class="w-4 h-4 text-text-primary" />
               <span class="font-medium text-text-primary">CTI Settings</span>
             </div>
             <ChevronDown class="w-4 h-4 text-text-secondary transition-transform {telephonyOpen.includes('cti') ? 'rotate-180' : ''}" />
@@ -700,7 +700,7 @@
             onclick={() => toggleSection('recording', telephonyOpen, v => telephonyOpen = v)}
           >
             <div class="flex items-center gap-2">
-              <Shield class="w-4 h-4 text-primary-400" />
+              <Shield class="w-4 h-4 text-text-primary" />
               <span class="font-medium text-text-primary">Recording Access</span>
             </div>
             <ChevronDown class="w-4 h-4 text-text-secondary transition-transform {telephonyOpen.includes('recording') ? 'rotate-180' : ''}" />
@@ -733,7 +733,7 @@
             onclick={() => toggleSection('reporting', telephonyOpen, v => telephonyOpen = v)}
           >
             <div class="flex items-center gap-2">
-              <BarChart3 class="w-4 h-4 text-primary-400" />
+              <BarChart3 class="w-4 h-4 text-text-primary" />
               <span class="font-medium text-text-primary">Call Reporting</span>
             </div>
             <ChevronDown class="w-4 h-4 text-text-secondary transition-transform {telephonyOpen.includes('reporting') ? 'rotate-180' : ''}" />
@@ -792,7 +792,7 @@
             onclick={() => toggleSection('scv', integrationOpen, v => integrationOpen = v)}
           >
             <div class="flex items-center gap-2">
-              <Cloud class="w-4 h-4 text-primary-400" />
+              <Cloud class="w-4 h-4 text-text-primary" />
               <span class="font-medium text-text-primary">Service Cloud Voice</span>
             </div>
             <ChevronDown class="w-4 h-4 text-text-secondary transition-transform {integrationOpen.includes('scv') ? 'rotate-180' : ''}" />
@@ -871,7 +871,7 @@
               onclick={() => toggleSection('messaging', integrationOpen, v => integrationOpen = v)}
             >
               <div class="flex items-center gap-2">
-                <MessageSquare class="w-4 h-4 text-primary-400" />
+                <MessageSquare class="w-4 h-4 text-text-primary" />
                 <span class="font-medium text-text-primary">Messaging</span>
               </div>
               <ChevronDown class="w-4 h-4 text-text-secondary transition-transform {integrationOpen.includes('messaging') ? 'rotate-180' : ''}" />
@@ -909,7 +909,7 @@
               onclick={() => toggleSection('ai', integrationOpen, v => integrationOpen = v)}
             >
               <div class="flex items-center gap-2">
-                <Sparkles class="w-4 h-4 text-primary-400" />
+                <Sparkles class="w-4 h-4 text-text-primary" />
                 <span class="font-medium text-text-primary">AI Advisor</span>
               </div>
               <ChevronDown class="w-4 h-4 text-text-secondary transition-transform {integrationOpen.includes('ai') ? 'rotate-180' : ''}" />
@@ -1001,14 +1001,14 @@
         >
           {#snippet cell(column, row)}
             {#if column.key === 'name'}
-              <button onclick={() => openProfileEdit(row)} class="text-primary-400 hover:text-primary-300 hover:underline font-medium text-left">{row.name}</button>
+              <button onclick={() => openProfileEdit(row)} class="text-text-primary hover:text-primary-300 hover:underline font-medium text-left">{row.name}</button>
             {:else if column.key === 'sapienId'}
               <span class="font-mono text-xs text-text-secondary">{row.sapienId}</span>
             {:else if column.key === 'createdByName'}
               <span class="text-text-primary">{row.createdByName}</span>
             {:else if column.key === 'actions'}
               <div class="flex items-center gap-1">
-                <button onclick={() => openProfileEdit(row)} class="p-1.5 rounded hover:bg-bg-tertiary text-primary-400 hover:text-primary-300" title="Edit">
+                <button onclick={() => openProfileEdit(row)} class="p-1.5 rounded hover:bg-bg-tertiary text-text-primary hover:text-primary-300" title="Edit">
                   <Edit class="w-3.5 h-3.5" />
                 </button>
                 <button onclick={() => deleteProfile(row)} class="p-1.5 rounded hover:bg-bg-tertiary text-error hover:text-red-400" title="Delete">
@@ -1044,7 +1044,7 @@
         >
           {#snippet cell(column, row)}
             {#if column.key === 'name'}
-              <button onclick={() => openSkillEdit(row)} class="text-primary-400 hover:text-primary-300 hover:underline font-medium text-left">{row.name}</button>
+              <button onclick={() => openSkillEdit(row)} class="text-text-primary hover:text-primary-300 hover:underline font-medium text-left">{row.name}</button>
             {:else if column.key === 'proficiency'}
               <Badge variant={row.weight > 0 ? 'success' : 'neutral'} size="sm">{row.proficiency}</Badge>
             {:else if column.key === 'weight'}
@@ -1053,7 +1053,7 @@
               <span class="text-text-secondary text-sm truncate max-w-xs block">{row.description || '—'}</span>
             {:else if column.key === 'actions'}
               <div class="flex items-center gap-1">
-                <button onclick={() => openSkillEdit(row)} class="p-1.5 rounded hover:bg-bg-tertiary text-primary-400 hover:text-primary-300" title="Edit">
+                <button onclick={() => openSkillEdit(row)} class="p-1.5 rounded hover:bg-bg-tertiary text-text-primary hover:text-primary-300" title="Edit">
                   <Edit class="w-3.5 h-3.5" />
                 </button>
                 <button onclick={() => deleteSkill(row)} class="p-1.5 rounded hover:bg-bg-tertiary text-error hover:text-red-400" title="Delete">
@@ -1089,7 +1089,7 @@
         >
           {#snippet cell(column, row)}
             {#if column.key === 'tag'}
-              <button onclick={() => openSoundEdit(row)} class="text-primary-400 hover:text-primary-300 hover:underline font-medium text-left">{row.tag}</button>
+              <button onclick={() => openSoundEdit(row)} class="text-text-primary hover:text-primary-300 hover:underline font-medium text-left">{row.tag}</button>
             {:else if column.key === 'description'}
               <span class="text-text-secondary text-sm truncate max-w-xs block">{row.description || '—'}</span>
             {:else if column.key === 'size'}
@@ -1100,14 +1100,14 @@
               <span class="text-sm text-text-primary">{row.createdByName}</span>
             {:else if column.key === 'actions'}
               <div class="flex items-center gap-1">
-                <button onclick={() => playSound(row)} class="p-1.5 rounded hover:bg-bg-tertiary {playingSound === row.id ? 'text-success' : 'text-primary-400 hover:text-primary-300'}" title={playingSound === row.id ? 'Stop' : 'Play'}>
+                <button onclick={() => playSound(row)} class="p-1.5 rounded hover:bg-bg-tertiary {playingSound === row.id ? 'text-success' : 'text-text-primary hover:text-primary-300'}" title={playingSound === row.id ? 'Stop' : 'Play'}>
                   {#if playingSound === row.id}
                     <Square class="w-3.5 h-3.5" />
                   {:else}
                     <Play class="w-3.5 h-3.5" />
                   {/if}
                 </button>
-                <button onclick={() => openSoundEdit(row)} class="p-1.5 rounded hover:bg-bg-tertiary text-primary-400 hover:text-primary-300" title="Edit">
+                <button onclick={() => openSoundEdit(row)} class="p-1.5 rounded hover:bg-bg-tertiary text-text-primary hover:text-primary-300" title="Edit">
                   <Edit class="w-3.5 h-3.5" />
                 </button>
                 <button onclick={() => deleteSound(row)} class="p-1.5 rounded hover:bg-bg-tertiary text-error hover:text-red-400" title="Delete">
@@ -1237,7 +1237,7 @@
       <!-- Header -->
       <div class="p-4 border-b border-border flex items-center justify-between">
         <div class="flex items-center gap-2">
-          <Upload class="w-5 h-5 text-primary-400" />
+          <Upload class="w-5 h-5 text-text-primary" />
           <h3 class="font-semibold text-text-primary">Upload Sound File</h3>
         </div>
         <button onclick={closeUploadModal} class="text-text-secondary hover:text-text-primary" disabled={isUploading}>
@@ -1291,7 +1291,7 @@
           <div class="border border-border rounded-lg p-4 bg-bg-secondary">
             <div class="flex items-start gap-3">
               <div class="w-10 h-10 rounded-lg bg-primary-400/10 flex items-center justify-center flex-shrink-0">
-                <Music class="w-5 h-5 text-primary-400" />
+                <Music class="w-5 h-5 text-text-primary" />
               </div>
               <div class="flex-1 min-w-0">
                 <p class="text-text-primary font-medium truncate">{uploadFile.name}</p>
@@ -1348,7 +1348,7 @@
           <div class="space-y-2">
             <div class="flex items-center justify-between text-sm">
               <span class="text-text-secondary">Uploading...</span>
-              <span class="text-primary-400 font-medium">{uploadProgress}%</span>
+              <span class="text-text-primary font-medium">{uploadProgress}%</span>
             </div>
             <div class="h-2 bg-bg-tertiary rounded-full overflow-hidden">
               <div 

@@ -98,7 +98,7 @@
     <div class="flex items-center gap-4 flex-1">
       <!-- Icon -->
       <div class="w-14 h-14 rounded-full bg-accent/10 flex items-center justify-center">
-        <Monitor class="w-7 h-7 text-accent" />
+        <Monitor class="w-7 h-7 text-text-primary" />
       </div>
       
       <div class="flex-1">
@@ -171,7 +171,7 @@
         <Card>
           {#snippet header()}
             <div class="flex items-center gap-2">
-              <Monitor class="w-4 h-4 text-accent" />
+              <Monitor class="w-4 h-4 text-text-primary" />
               <h3 class="font-semibold text-text-primary">Device Information</h3>
             </div>
           {/snippet}
@@ -242,7 +242,7 @@
         <Card>
           {#snippet header()}
             <div class="flex items-center gap-2">
-              <Settings class="w-4 h-4 text-accent" />
+              <Settings class="w-4 h-4 text-text-primary" />
               <h3 class="font-semibold text-text-primary">Technical Details</h3>
             </div>
           {/snippet}
@@ -302,7 +302,7 @@
               {#if data.device.assignedUserName}
                 <div class="flex justify-between items-center text-sm">
                   <span class="text-text-secondary">Assigned User</span>
-                  <a href="/users/{data.device.assignedUserId}" class="text-primary-400 hover:text-primary-300 hover:underline">
+                  <a href="/users/{data.device.assignedUserId}" class="text-text-primary hover:text-primary-300 hover:underline">
                     {data.device.assignedUserName}
                   </a>
                 </div>

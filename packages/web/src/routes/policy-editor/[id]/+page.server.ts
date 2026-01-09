@@ -1,5 +1,5 @@
 import type { PageServerLoad, Actions } from './$types';
-import { hasValidCredentials, querySalesforce, updateSalesforce, deleteSalesforce } from '$lib/server/salesforce';
+import { tryCreateContextAndRepositories, isSalesforceContext } from '$lib/adapters';
 import { 
   savePolicyToSapien, 
   createPolicyInSapien,
@@ -16,7 +16,6 @@ import {
   syncEventSubscriptionsFromPolicy,
   deleteEventSubscriptionsForPolicy 
 } from '$lib/server/events';
-import { env } from '$env/dynamic/private';
 import { error, fail } from '@sveltejs/kit';
 import { buildPayload, type PolicyData as BuildPayloadPolicy } from '$lib/policy-editor/buildPayload';
 
@@ -41,6 +40,7 @@ export interface PolicyData {
   isActive: boolean;
   createdDate: string;
   lastModifiedDate: string;
+  platformId?: number;
 }
 
 export interface PolicyBody {
@@ -94,8 +94,6 @@ export interface PhoneNumberData {
   number: string;
 }
 
-const NAMESPACE = env.SALESFORCE_PACKAGE_NAMESPACE || 'nbavs';
-
 // Map legacy Natterbox templateClass values to our editor node types
 function mapLegacyNodeType(templateClass?: string, nodeType?: string): string {
   const classMap: Record<string, string> = {
@@ -132,55 +130,49 @@ function mapLegacyNodeType(templateClass?: string, nodeType?: string): string {
 export const load: PageServerLoad = async ({ params, locals }) => {
   const policyId = params.id;
 
-  // Return demo data for explicit 'demo' ID or unauthenticated users
-  if (policyId === 'demo' || !hasValidCredentials(locals)) {
+  // Return demo data for explicit 'demo' ID
+  if (policyId === 'demo') {
+    return getDemoData(policyId);
+  }
+
+  const result = tryCreateContextAndRepositories(locals);
+
+  // Not authenticated - show demo data
+  if (!result) {
+    return getDemoData(policyId);
+  }
+
+  const { repos, isDemo } = result;
+
+  if (isDemo) {
     return getDemoData(policyId);
   }
 
   try {
-    // Fetch the policy
-    // Using only fields confirmed to exist on CallFlow__c from routing-policies page
-    const policyQuery = `
-      SELECT Id, Name, ${NAMESPACE}__Description__c, ${NAMESPACE}__Body__c, 
-             ${NAMESPACE}__Status__c, CreatedDate, LastModifiedDate
-      FROM ${NAMESPACE}__CallFlow__c 
-      WHERE Id = '${policyId}'
-      LIMIT 1
-    `;
-
-    const policyResult = await querySalesforce(
-      locals.instanceUrl!,
-      locals.accessToken!,
-      policyQuery
-    );
-
-    if (!policyResult.records || policyResult.records.length === 0) {
+    // Fetch the policy using repository
+    const policy = await repos.routingPolicies.findById(policyId);
+    
+    console.log('[PolicyEditor] Fetched policy:', policy?.id, policy?.name, 'body length:', policy?.body ? String(policy.body).length : 0);
+    
+    if (!policy) {
       throw error(404, 'Policy not found');
     }
 
-    const rawPolicy = policyResult.records[0];
-    
     // Parse the policy body JSON
     let body: PolicyBody = { nodes: [], edges: [] };
-    try {
-      const bodyField = rawPolicy[`${NAMESPACE}__Body__c`];
-      if (bodyField) {
-        const parsed = JSON.parse(bodyField);
+    if (policy.body) {
+      try {
+        const bodyData = typeof policy.body === 'string' ? JSON.parse(policy.body) : policy.body;
         
         // Transform legacy Natterbox format to our expected format
-        // Legacy nodes have x,y at root level, we need position: {x, y}
-        const rawNodes = Array.isArray(parsed.nodes) ? parsed.nodes : [];
+        const rawNodes = Array.isArray(bodyData.nodes) ? bodyData.nodes : [];
         const transformedNodes = rawNodes.map((node: Record<string, unknown>) => {
-          // For Action container nodes, get a better label from the outputs
           let label = node.name || node.title || 'Node';
           const outputs = node.outputs as Array<Record<string, unknown>> | undefined;
           
           if (node.templateClass === 'ModAction' && outputs && outputs.length > 0) {
-            // Use the first output's name/title as the label
             const firstOutput = outputs[0];
             label = (firstOutput.name || firstOutput.title || label) as string;
-            
-            // If there are multiple outputs, show count
             if (outputs.length > 1) {
               label = `${label} (+${outputs.length - 1})`;
             }
@@ -209,10 +201,8 @@ export const load: PageServerLoad = async ({ params, locals }) => {
           };
         });
         
-        // Legacy format uses 'connections' array with {source: {nodeID, id}, dest: {nodeID, id}}
-        // Our format uses 'edges' array with {id, source, target, sourceHandle, targetHandle}
-        const rawConnections = Array.isArray(parsed.connections) ? parsed.connections : [];
-        const rawEdges = Array.isArray(parsed.edges) ? parsed.edges : [];
+        const rawConnections = Array.isArray(bodyData.connections) ? bodyData.connections : [];
+        const rawEdges = Array.isArray(bodyData.edges) ? bodyData.edges : [];
         
         const transformedEdges = rawConnections.length > 0 
           ? rawConnections.map((conn: Record<string, unknown>, index: number) => {
@@ -231,39 +221,62 @@ export const load: PageServerLoad = async ({ params, locals }) => {
         body = {
           nodes: transformedNodes,
           edges: transformedEdges,
-          viewport: parsed.viewport || { 
-            x: parsed.translateX || 0, 
-            y: parsed.translateY || 0, 
-            zoom: parsed.zoom || 1 
+          viewport: bodyData.viewport || { 
+            x: bodyData.translateX || 0, 
+            y: bodyData.translateY || 0, 
+            zoom: bodyData.zoom || 1 
           },
         };
+      } catch (e) {
+        console.warn('Failed to parse policy body:', e);
       }
-    } catch (e) {
-      console.warn('Failed to parse policy body:', e);
     }
 
-    const policy: PolicyData = {
-      id: rawPolicy.Id,
-      name: rawPolicy.Name,
-      description: rawPolicy[`${NAMESPACE}__Description__c`] || '',
+    const policyData: PolicyData = {
+      id: policy.id,
+      name: policy.name,
+      description: policy.description,
       body,
-      color: '#3b82f6', // Default color - field may not exist on all orgs
-      grid: true, // Default grid - field may not exist on all orgs
-      isActive: rawPolicy[`${NAMESPACE}__Status__c`] === 'Enabled',
-      createdDate: rawPolicy.CreatedDate,
-      lastModifiedDate: rawPolicy.LastModifiedDate,
+      color: '#3b82f6',
+      grid: true,
+      isActive: policy.status === 'active',
+      createdDate: policy.createdDate || new Date().toISOString(),
+      lastModifiedDate: policy.lastModifiedDate || new Date().toISOString(),
+      platformId: policy.platformId,
     };
 
-    // Fetch supporting data in parallel
-    const [users, groups, sounds, phoneNumbers] = await Promise.all([
-      fetchUsers(locals),
-      fetchGroups(locals),
-      fetchSounds(locals),
-      fetchPhoneNumbers(locals),
+    // Fetch supporting data in parallel using repositories
+    const [userResult, groupResult, soundResult, phoneResult] = await Promise.all([
+      repos.users.findAll({ page: 1, pageSize: 1000 }),
+      repos.groups.findAll({ page: 1, pageSize: 1000 }),
+      repos.sounds.findAll({ page: 1, pageSize: 1000 }),
+      repos.phoneNumbers.findAll({ page: 1, pageSize: 1000 }),
     ]);
 
+    const users: UserData[] = userResult.items.map(u => ({
+      id: u.id,
+      name: u.name,
+      email: u.email,
+    }));
+
+    const groups: GroupData[] = groupResult.items.map(g => ({
+      id: g.id,
+      name: g.name,
+    }));
+
+    const sounds: SoundData[] = soundResult.items.map(s => ({
+      id: s.id,
+      name: s.name,
+    }));
+
+    const phoneNumbers: PhoneNumberData[] = phoneResult.items.map(p => ({
+      id: p.id,
+      name: p.name,
+      number: p.number,
+    }));
+
     return {
-      policy,
+      policy: policyData,
       users,
       groups,
       sounds,
@@ -291,86 +304,6 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   }
 };
 
-async function fetchUsers(locals: App.Locals): Promise<UserData[]> {
-  try {
-    // Only query fields confirmed to exist
-    const query = `
-      SELECT Id, Name
-      FROM ${NAMESPACE}__User__c
-      ORDER BY Name
-      LIMIT 1000
-    `;
-    const result = await querySalesforce(locals.instanceUrl!, locals.accessToken!, query);
-    return (result.records || []).map((r: Record<string, unknown>) => ({
-      id: r.Id as string,
-      name: r.Name as string,
-    }));
-  } catch (e) {
-    console.warn('Failed to fetch users:', e);
-    return [];
-  }
-}
-
-async function fetchGroups(locals: App.Locals): Promise<GroupData[]> {
-  try {
-    const query = `
-      SELECT Id, Name
-      FROM ${NAMESPACE}__Group__c
-      ORDER BY Name
-      LIMIT 1000
-    `;
-    const result = await querySalesforce(locals.instanceUrl!, locals.accessToken!, query);
-    return (result.records || []).map((r: Record<string, unknown>) => ({
-      id: r.Id as string,
-      name: r.Name as string,
-    }));
-  } catch (e) {
-    console.warn('Failed to fetch groups:', e);
-    return [];
-  }
-}
-
-async function fetchSounds(locals: App.Locals): Promise<SoundData[]> {
-  try {
-    // Sound__c object may not exist in all orgs, just query basic fields
-    const query = `
-      SELECT Id, Name
-      FROM ${NAMESPACE}__Sound__c
-      ORDER BY Name
-      LIMIT 1000
-    `;
-    const result = await querySalesforce(locals.instanceUrl!, locals.accessToken!, query);
-    return (result.records || []).map((r: Record<string, unknown>) => ({
-      id: r.Id as string,
-      name: r.Name as string,
-    }));
-  } catch (e) {
-    // Sound__c object may not exist - this is expected in many orgs
-    console.warn('Failed to fetch sounds (object may not exist):', e);
-    return [];
-  }
-}
-
-async function fetchPhoneNumbers(locals: App.Locals): Promise<PhoneNumberData[]> {
-  try {
-    const query = `
-      SELECT Id, Name, ${NAMESPACE}__Number__c
-      FROM ${NAMESPACE}__PhoneNumber__c
-      ORDER BY Name
-      LIMIT 1000
-    `;
-    const result = await querySalesforce(locals.instanceUrl!, locals.accessToken!, query);
-    return (result.records || []).map((r: Record<string, unknown>) => ({
-      id: r.Id as string,
-      name: r.Name as string,
-      number: r[`${NAMESPACE}__Number__c`] as string,
-    }));
-  } catch (e) {
-    console.warn('Failed to fetch phone numbers:', e);
-    return [];
-  }
-}
-
 function getDemoData(policyId: string): PolicyEditorPageData {
   return {
     policy: {
@@ -379,168 +312,28 @@ function getDemoData(policyId: string): PolicyEditorPageData {
       description: 'This is a demonstration routing policy showing all node types',
       body: {
         nodes: [
-          // === ENTRY POINTS (Row 1) ===
           {
             id: 'inbound-1',
             type: 'inboundNumber',
             position: { x: 50, y: 50 },
-            data: { 
-              label: 'Inbound Number',
-              phoneNumber: '+1 555-0100',
-            },
+            data: { label: 'Inbound Number', phoneNumber: '+1 555-0100' },
           },
-          {
-            id: 'extension-1',
-            type: 'extensionNumber',
-            position: { x: 280, y: 50 },
-            data: { 
-              label: 'Extension',
-              extension: '1001',
-            },
-          },
-          {
-            id: 'sipTrunk-1',
-            type: 'sipTrunk',
-            position: { x: 510, y: 50 },
-            data: { 
-              label: 'SIP Trunk',
-            },
-          },
-          {
-            id: 'inboundMessage-1',
-            type: 'inboundMessage',
-            position: { x: 740, y: 50 },
-            data: { 
-              label: 'Inbound Message',
-            },
-          },
-          {
-            id: 'invokable-1',
-            type: 'invokableDestination',
-            position: { x: 970, y: 50 },
-            data: { 
-              label: 'Invokable Destination',
-            },
-          },
-          {
-            id: 'fromPolicy-1',
-            type: 'fromPolicy',
-            position: { x: 1200, y: 50 },
-            data: { 
-              label: 'From Policy',
-            },
-          },
-          
-          // === CONTAINERS (Row 2) ===
           {
             id: 'action-1',
             type: 'action',
             position: { x: 50, y: 250 },
-            data: { 
-              label: 'Action',
-              containerType: 'action',
-              outputs: [
-                {
-                  id: 'action-1-speak',
-                  name: 'Speak',
-                  title: 'Speak',
-                  type: 'speak',
-                  output: { id: 'action-1-speak-out', name: 'Default', type: 'default', target: null },
-                },
-                {
-                  id: 'action-1-queue',
-                  name: 'Call Queue',
-                  title: 'Call Queue',
-                  type: 'callQueue',
-                  output: { id: 'action-1-queue-out', name: 'Default', type: 'default', target: null },
-                },
-              ],
-            },
+            data: { label: 'Action', containerType: 'action' },
           },
-          {
-            id: 'switchboard-1',
-            type: 'switchBoard',
-            position: { x: 330, y: 250 },
-            data: { 
-              label: 'Switchboard',
-              containerType: 'switchBoard',
-              outputs: [
-                {
-                  id: 'sw-1-option1',
-                  name: 'Sales',
-                  title: 'Sales',
-                  type: 'switchItem',
-                  output: { id: 'sw-1-option1-out', name: 'Default', type: 'default', target: null },
-                },
-                {
-                  id: 'sw-1-option2',
-                  name: 'Support',
-                  title: 'Support',
-                  type: 'switchItem',
-                  output: { id: 'sw-1-option2-out', name: 'Default', type: 'default', target: null },
-                },
-              ],
-            },
-          },
-          {
-            id: 'natterboxAI-1',
-            type: 'natterboxAI',
-            position: { x: 610, y: 250 },
-            data: { 
-              label: 'Natterbox AI',
-              containerType: 'natterboxAI',
-              outputs: [
-                {
-                  id: 'ai-1-intent1',
-                  name: 'Book Appointment',
-                  title: 'Book Appointment',
-                  type: 'aiIntent',
-                  output: { id: 'ai-1-intent1-out', name: 'Default', type: 'default', target: null },
-                },
-              ],
-            },
-          },
-          {
-            id: 'omniChannel-1',
-            type: 'omniChannelFlow',
-            position: { x: 890, y: 250 },
-            data: { 
-              label: 'Omni Channel Flow',
-              containerType: 'omniChannelFlow',
-            },
-          },
-          {
-            id: 'toPolicy-1',
-            type: 'toPolicy',
-            position: { x: 1170, y: 250 },
-            data: { 
-              label: 'To Policy',
-              targetPolicy: 'other-policy-id',
-            },
-          },
-          
-          // === OUTPUT (Row 3) ===
           {
             id: 'finish-1',
             type: 'finish',
             position: { x: 550, y: 450 },
-            data: { 
-              label: 'Finish',
-            },
+            data: { label: 'Finish' },
           },
         ],
         edges: [
-          // Entry points to containers
           { id: 'e1', source: 'inbound-1', target: 'action-1' },
-          { id: 'e2', source: 'extension-1', target: 'switchboard-1' },
-          { id: 'e3', source: 'sipTrunk-1', target: 'natterboxAI-1' },
-          { id: 'e4', source: 'inboundMessage-1', target: 'omniChannel-1' },
-          { id: 'e5', source: 'invokable-1', target: 'toPolicy-1' },
-          // Containers to finish
-          { id: 'e6', source: 'action-1', target: 'finish-1' },
-          { id: 'e7', source: 'switchboard-1', target: 'finish-1' },
-          { id: 'e8', source: 'natterboxAI-1', target: 'finish-1' },
-          { id: 'e9', source: 'omniChannel-1', target: 'finish-1' },
+          { id: 'e2', source: 'action-1', target: 'finish-1' },
         ],
         viewport: { x: 0, y: 0, zoom: 0.8 },
       },
@@ -553,22 +346,18 @@ function getDemoData(policyId: string): PolicyEditorPageData {
     users: [
       { id: 'u1', name: 'John Smith', email: 'john@example.com' },
       { id: 'u2', name: 'Jane Doe', email: 'jane@example.com' },
-      { id: 'u3', name: 'Bob Wilson', email: 'bob@example.com' },
     ],
     groups: [
       { id: 'g1', name: 'Sales' },
       { id: 'g2', name: 'Support' },
-      { id: 'g3', name: 'Engineering' },
     ],
     sounds: [
       { id: 's1', name: 'Hold Music 1' },
       { id: 's2', name: 'Welcome Message' },
-      { id: 's3', name: 'Transfer Message' },
     ],
     phoneNumbers: [
       { id: 'p1', name: 'Main Line', number: '+1 555-0100' },
       { id: 'p2', name: 'Support Line', number: '+1 555-0200' },
-      { id: 'p3', name: 'Sales Line', number: '+1 555-0300' },
     ],
     isAuthenticated: false,
     isDemo: true,
@@ -581,17 +370,20 @@ function getDemoData(policyId: string): PolicyEditorPageData {
 export const actions: Actions = {
   /**
    * Save the policy to both Sapien and Salesforce
-   * 
-   * The save flow:
-   * 1. Build the payload (Body__c for Salesforce, Policy__c for Sapien)
-   * 2. Save to Sapien first (the actual routing engine)
-   * 3. Save to Salesforce (the source of truth for UI)
-   * 
-   * This mirrors the behavior of CallFlowRemoting.saveCallFlow in the Apex code.
    */
   save: async ({ request, locals, params }) => {
-    if (!hasValidCredentials(locals)) {
+    const result = tryCreateContextAndRepositories(locals);
+    if (!result) {
       return fail(401, { error: 'Not authenticated' });
+    }
+
+    const { repos, isDemo, ctx } = result;
+    if (isDemo) {
+      return fail(400, { error: 'Not available in demo mode' });
+    }
+
+    if (!isSalesforceContext(ctx)) {
+      return fail(400, { error: 'Policy editing requires Salesforce context' });
     }
 
     try {
@@ -604,81 +396,32 @@ export const actions: Actions = {
 
       const policyData = JSON.parse(policyDataJson) as BuildPayloadPolicy;
       
-      // Fetch the current Salesforce config (API_v1__c)
-      const configQuery = `
-        SELECT Id, ${NAMESPACE}__DevOrgId__c, ${NAMESPACE}__ConnectorId__c
-        FROM ${NAMESPACE}__API_v1__c
-        LIMIT 1
-      `;
+      // Get the existing policy's Natterbox ID (platformId) if it exists
+      let natterboxId: number | null = policyData.Id__c ? parseInt(String(policyData.Id__c), 10) : null;
       
-      let config = {
-        DevOrgId__c: '',
-        ConnectorId__c: '',
-      };
-      
-      try {
-        const configResult = await querySalesforce(
-          locals.instanceUrl!,
-          locals.accessToken!,
-          configQuery
-        );
-        if (configResult.records?.length > 0) {
-          const rec = configResult.records[0] as Record<string, string>;
-          config = {
-            DevOrgId__c: rec[`${NAMESPACE}__DevOrgId__c`] || '',
-            ConnectorId__c: rec[`${NAMESPACE}__ConnectorId__c`] || '',
-          };
+      if (!natterboxId) {
+        // Fetch it from the repository
+        const existingPolicy = await repos.routingPolicies.findById(params.id);
+        if (existingPolicy?.platformId) {
+          natterboxId = existingPolicy.platformId;
         }
-      } catch (e) {
-        console.warn('Failed to fetch API config, using defaults:', e);
       }
 
-      // Build the save payload using the ported buildPayload function
+      // Build the save payload
       const payload = buildPayload({
         policy: policyData,
-        config,
-        sounds: [], // Could be passed from client if needed
+        config: { DevOrgId__c: '', ConnectorId__c: '' },
+        sounds: [],
       });
 
-      // Get the existing policy's Natterbox ID (Id__c) if it exists
-      let natterboxId: number | null = null;
-      if (policyData.Id__c) {
-        natterboxId = parseInt(String(policyData.Id__c), 10);
-      } else {
-        // Fetch it from Salesforce
-        try {
-          const idQuery = `
-            SELECT ${NAMESPACE}__Id__c 
-            FROM ${NAMESPACE}__CallFlow__c 
-            WHERE Id = '${params.id}'
-            LIMIT 1
-          `;
-          const idResult = await querySalesforce(
-            locals.instanceUrl!,
-            locals.accessToken!,
-            idQuery
-          );
-          if (idResult.records?.length > 0) {
-            const idValue = idResult.records[0][`${NAMESPACE}__Id__c`];
-            if (idValue) {
-              natterboxId = parseInt(String(idValue), 10);
-            }
-          }
-        } catch (e) {
-          console.warn('Failed to fetch policy Id__c:', e);
-        }
-      }
-
       // ========== SAVE TO SAPIEN ==========
-      // This is what actually makes the routing work - Sapien is the call routing engine
       let sapienResult: { id?: number } | null = null;
       
       if (canUseSapienApi(locals)) {
         try {
-          // Get Gatekeeper JWT with routing-policies:admin scope
           const jwt = await getJwt(
-            locals.instanceUrl!,
-            locals.accessToken!,
+            ctx.instanceUrl,
+            ctx.accessToken,
             SAPIEN_SCOPES.ROUTING_POLICIES_ADMIN,
             locals.user?.id
           );
@@ -687,83 +430,37 @@ export const actions: Actions = {
           const sapienHost = getSapienHost();
           
           if (organizationId && sapienHost) {
-            console.log(`[Sapien Save] Saving policy to Sapien org ${organizationId}, natterboxId: ${natterboxId}`);
-            
             if (natterboxId) {
-              // Update existing policy
-              sapienResult = await savePolicyToSapien(
-                sapienHost,
-                jwt,
-                organizationId,
-                natterboxId,
-                payload.Policy__c
-              );
-              console.log(`[Sapien Save] Updated policy ${natterboxId}`);
+              sapienResult = await savePolicyToSapien(sapienHost, jwt, organizationId, natterboxId, payload.Policy__c);
             } else {
-              // Create new policy
-              sapienResult = await createPolicyInSapien(
-                sapienHost,
-                jwt,
-                organizationId,
-                payload.Policy__c
-              );
+              sapienResult = await createPolicyInSapien(sapienHost, jwt, organizationId, payload.Policy__c);
               natterboxId = sapienResult?.id ?? null;
-              console.log(`[Sapien Save] Created new policy with ID ${natterboxId}`);
             }
-          } else {
-            console.warn('[Sapien Save] No organization ID or host found, skipping Sapien save');
           }
         } catch (e) {
-          // Log but don't fail - Salesforce save is still important
           console.error('[Sapien Save] Error saving to Sapien:', e);
-          // We could choose to fail here if Sapien save is critical
-          // return fail(500, { error: `Failed to save to Natterbox: ${e instanceof Error ? e.message : 'Unknown error'}` });
         }
-      } else {
-        console.warn('[Sapien Save] Sapien not configured (SAPIEN_HOST missing or auth unavailable), saving to Salesforce only');
       }
 
-      // ========== SAVE TO SALESFORCE ==========
-      const updateData: Record<string, string | null> = {
-        Name: payload.Name,
-        [`${NAMESPACE}__Description__c`]: payload.Description__c,
-        [`${NAMESPACE}__Body__c`]: payload.Body__c,
-        [`${NAMESPACE}__Policy__c`]: payload.Policy__c,
-      };
-      
-      // Set the Natterbox ID if we got one from Sapien (for new policies)
-      if (natterboxId && !policyData.Id__c) {
-        updateData[`${NAMESPACE}__Id__c`] = String(natterboxId);
-      }
-      
-      // Only include Type__c if it's valid
-      if (payload.Type__c) {
-        updateData[`${NAMESPACE}__Type__c`] = payload.Type__c;
-      }
+      // ========== SAVE TO REPOSITORY ==========
+      const updateResult = await repos.routingPolicies.update(params.id, {
+        name: payload.Name,
+        description: payload.Description__c,
+        body: payload.Body__c,
+      });
 
-      await updateSalesforce(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        `${NAMESPACE}__CallFlow__c`,
-        params.id,
-        updateData
-      );
+      if (!updateResult.success) {
+        return fail(500, { error: updateResult.error || 'Failed to save policy' });
+      }
 
       // ========== SYNC EVENT SUBSCRIPTIONS ==========
-      // Extract event nodes from the policy and sync subscriptions
       let eventsSynced = false;
       if (natterboxId && canUseSapienApi(locals)) {
         try {
-          const jwt = await getJwt(
-            locals.instanceUrl!,
-            locals.accessToken!,
-            SAPIEN_SCOPES.ROUTING_POLICIES_ADMIN,
-            locals.user?.id
-          );
+          const jwt = await getJwt(ctx.instanceUrl, ctx.accessToken, SAPIEN_SCOPES.ROUTING_POLICIES_ADMIN, locals.user?.id);
           const organizationId = getOrganizationId();
           
           if (organizationId) {
-            // Extract event nodes from the policy body
             const nodes = policyData.nodes || [];
             const eventNodes = nodes
               .filter((n: { type?: string; data?: Record<string, unknown> }) => 
@@ -781,161 +478,98 @@ export const actions: Actions = {
             if (eventNodes.length > 0) {
               await syncEventSubscriptionsFromPolicy(jwt, organizationId, natterboxId, eventNodes);
               eventsSynced = true;
-              console.log(`[Events Sync] Synced ${eventNodes.length} event subscriptions`);
             }
           }
         } catch (e) {
           console.warn('[Events Sync] Failed to sync event subscriptions:', e);
-          // Don't fail the save operation for event sync errors
         }
       }
 
-      const savedToSapien = sapienResult !== null;
       return { 
         success: true, 
-        message: savedToSapien 
-          ? 'Policy saved successfully' 
-          : 'Policy saved to Salesforce (Sapien sync not available)',
+        message: sapienResult !== null ? 'Policy saved successfully' : 'Policy saved (Sapien sync not available)',
         natterboxId,
-        savedToSapien,
+        savedToSapien: sapienResult !== null,
         eventsSynced,
       };
     } catch (e) {
       console.error('Error saving policy:', e);
-      return fail(500, { 
-        error: e instanceof Error ? e.message : 'Failed to save policy' 
-      });
+      return fail(500, { error: e instanceof Error ? e.message : 'Failed to save policy' });
     }
   },
 
   /**
    * Delete the policy from both Sapien and Salesforce
-   * 
-   * The delete flow:
-   * 1. Get the Natterbox policy ID (Id__c from Salesforce)
-   * 2. Delete from Sapien first (the actual routing engine)
-   * 3. Delete from Salesforce (the source of truth for UI)
-   * 
-   * This mirrors the behavior of CallFlowRemoting.deleteCallFlow in the Apex code.
    */
   delete: async ({ locals, params }) => {
-    if (!hasValidCredentials(locals)) {
+    const result = tryCreateContextAndRepositories(locals);
+    if (!result) {
       return fail(401, { error: 'Not authenticated' });
+    }
+
+    const { repos, isDemo, ctx } = result;
+    if (isDemo) {
+      return fail(400, { error: 'Not available in demo mode' });
+    }
+
+    if (!isSalesforceContext(ctx)) {
+      return fail(400, { error: 'Policy deletion requires Salesforce context' });
     }
 
     try {
       const policyId = params.id;
       
-      // First, fetch the Natterbox ID (Id__c) from Salesforce
-      let natterboxId: number | null = null;
-      try {
-        const idQuery = `
-          SELECT ${NAMESPACE}__Id__c 
-          FROM ${NAMESPACE}__CallFlow__c 
-          WHERE Id = '${policyId}'
-          LIMIT 1
-        `;
-        const idResult = await querySalesforce(
-          locals.instanceUrl!,
-          locals.accessToken!,
-          idQuery
-        );
-        if (idResult.records?.length > 0) {
-          const idValue = idResult.records[0][`${NAMESPACE}__Id__c`];
-          if (idValue) {
-            natterboxId = parseInt(String(idValue), 10);
-          }
-        }
-      } catch (e) {
-        console.warn('Failed to fetch policy Id__c:', e);
-      }
+      // Get the Natterbox ID from the repository
+      const existingPolicy = await repos.routingPolicies.findById(policyId);
+      const natterboxId = existingPolicy?.platformId ?? null;
 
       // ========== DELETE EVENT SUBSCRIPTIONS ==========
-      // Delete any event subscriptions associated with this policy
-      let eventsDeleted = 0;
       if (natterboxId && canUseSapienApi(locals)) {
         try {
-          const jwt = await getJwt(
-            locals.instanceUrl!,
-            locals.accessToken!,
-            SAPIEN_SCOPES.ROUTING_POLICIES_ADMIN,
-            locals.user?.id
-          );
+          const jwt = await getJwt(ctx.instanceUrl, ctx.accessToken, SAPIEN_SCOPES.ROUTING_POLICIES_ADMIN, locals.user?.id);
           const organizationId = getOrganizationId();
           
           if (organizationId) {
-            eventsDeleted = await deleteEventSubscriptionsForPolicy(jwt, organizationId, natterboxId);
-            console.log(`[Events Delete] Deleted ${eventsDeleted} event subscriptions`);
+            await deleteEventSubscriptionsForPolicy(jwt, organizationId, natterboxId);
           }
         } catch (e) {
           console.warn('[Events Delete] Failed to delete event subscriptions:', e);
-          // Continue with policy deletion even if event cleanup fails
         }
       }
 
       // ========== DELETE FROM SAPIEN ==========
-      // This removes the policy from the call routing engine
       let deletedFromSapien = false;
       
       if (canUseSapienApi(locals) && natterboxId) {
         try {
-          // Get Gatekeeper JWT with routing-policies:admin scope
-          const jwt = await getJwt(
-            locals.instanceUrl!,
-            locals.accessToken!,
-            SAPIEN_SCOPES.ROUTING_POLICIES_ADMIN,
-            locals.user?.id
-          );
-          
+          const jwt = await getJwt(ctx.instanceUrl, ctx.accessToken, SAPIEN_SCOPES.ROUTING_POLICIES_ADMIN, locals.user?.id);
           const organizationId = getOrganizationId();
           const sapienHost = getSapienHost();
           
           if (organizationId && sapienHost) {
-            console.log(`[Sapien Delete] Deleting policy ${natterboxId} from org ${organizationId}`);
-            
-            await deletePolicyFromSapien(
-              sapienHost,
-              jwt,
-              organizationId,
-              natterboxId
-            );
+            await deletePolicyFromSapien(sapienHost, jwt, organizationId, natterboxId);
             deletedFromSapien = true;
-            console.log(`[Sapien Delete] Successfully deleted policy ${natterboxId}`);
-          } else {
-            console.warn('[Sapien Delete] No organization ID or host found, skipping Sapien delete');
           }
         } catch (e) {
-          // Log but continue - we still want to delete from Salesforce
-          // A policy might not exist in Sapien (e.g., if it was never synced)
           console.error('[Sapien Delete] Error deleting from Sapien:', e);
         }
-      } else if (!natterboxId) {
-        console.warn('[Sapien Delete] No Natterbox ID found, skipping Sapien delete');
-      } else {
-        console.warn('[Sapien Delete] Sapien auth not available, deleting from Salesforce only');
       }
 
-      // ========== DELETE FROM SALESFORCE ==========
-      await deleteSalesforce(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        `${NAMESPACE}__CallFlow__c`,
-        policyId
-      );
+      // ========== DELETE FROM REPOSITORY ==========
+      const deleteResult = await repos.routingPolicies.delete(policyId);
+
+      if (!deleteResult.success) {
+        return fail(500, { error: deleteResult.error || 'Failed to delete policy' });
+      }
 
       return { 
         success: true, 
-        message: deletedFromSapien 
-          ? 'Policy deleted successfully' 
-          : 'Policy deleted from Salesforce (Sapien sync not available or policy not in Sapien)',
+        message: deletedFromSapien ? 'Policy deleted successfully' : 'Policy deleted (Sapien sync not available)',
         deletedFromSapien,
       };
     } catch (e) {
       console.error('Error deleting policy:', e);
-      return fail(500, { 
-        error: e instanceof Error ? e.message : 'Failed to delete policy' 
-      });
+      return fail(500, { error: e instanceof Error ? e.message : 'Failed to delete policy' });
     }
   },
 };
-

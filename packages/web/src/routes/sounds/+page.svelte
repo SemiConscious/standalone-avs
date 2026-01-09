@@ -15,6 +15,7 @@
     FileAudio,
     Settings,
     X,
+    Loader2,
   } from 'lucide-svelte';
   import type { SoundsPageData } from './+page.server';
   import type { ActionData } from './$types';
@@ -39,6 +40,7 @@
   
   // Audio playback
   let playingId = $state<string | null>(null);
+  let loadingId = $state<string | null>(null);
   let audioElement: HTMLAudioElement | null = $state(null);
   
   function formatDate(dateString: string): string {
@@ -82,19 +84,32 @@
       // Stop playing
       audioElement?.pause();
       playingId = null;
+      loadingId = null;
     } else {
       // Start playing (demo mode doesn't have real audio)
       if (audioUrl) {
+        loadingId = soundId;
         audioElement = new Audio(audioUrl);
+        audioElement.oncanplaythrough = () => {
+          loadingId = null;
+          playingId = soundId;
+        };
         audioElement.onended = () => {
           playingId = null;
+          loadingId = null;
         };
-        audioElement.play();
-      }
-      playingId = soundId;
-      
-      // Auto-stop after simulated duration for demo
-      if (!audioUrl) {
+        audioElement.onerror = () => {
+          loadingId = null;
+          playingId = null;
+        };
+        audioElement.play().catch(() => {
+          loadingId = null;
+        });
+      } else {
+        // Demo mode - no real audio
+        playingId = soundId;
+        
+        // Auto-stop after simulated duration for demo
         setTimeout(() => {
           playingId = null;
         }, 2000);
@@ -177,7 +192,7 @@
     <Card>
       <div class="flex items-center gap-3">
         <div class="p-3 bg-accent/10 rounded-base">
-          <Volume2 class="w-6 h-6 text-accent" />
+          <Volume2 class="w-6 h-6 text-text-primary" />
         </div>
         <div>
           <p class="text-2xl font-bold">{data.sounds.length}</p>
@@ -213,7 +228,7 @@
   <Card>
     {#snippet header()}
       <div class="flex items-center gap-2">
-        <Volume2 class="w-5 h-5 text-accent" />
+        <Volume2 class="w-5 h-5 text-text-primary" />
         <h2 class="font-semibold">Sound Library</h2>
       </div>
     {/snippet}
@@ -230,11 +245,14 @@
                   type="button"
                   onclick={() => togglePlay(sound.id, sound.audioUrl)}
                   class="p-3 bg-accent/10 hover:bg-accent/20 rounded-full transition-colors"
+                  disabled={loadingId === sound.id}
                 >
-                  {#if playingId === sound.id}
-                    <Pause class="w-5 h-5 text-accent" />
+                  {#if loadingId === sound.id}
+                    <Loader2 class="w-5 h-5 text-text-primary animate-spin" />
+                  {:else if playingId === sound.id}
+                    <Pause class="w-5 h-5 text-text-primary" />
                   {:else}
-                    <Play class="w-5 h-5 text-accent" />
+                    <Play class="w-5 h-5 text-text-primary" />
                   {/if}
                 </button>
                 

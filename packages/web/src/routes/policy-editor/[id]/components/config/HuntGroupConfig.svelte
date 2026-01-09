@@ -89,7 +89,7 @@
               }
               handleChange();
             }}
-            class="w-4 h-4 rounded border-border text-accent focus:ring-accent"
+            class="w-4 h-4 rounded border-border text-text-primary focus:ring-accent"
           />
           <span class="text-sm">{option.label}</span>
         </label>
@@ -105,7 +105,7 @@
           type="button"
           onclick={() => activeTab = index}
           class="px-4 py-2 text-sm font-medium border-b-2 transition-colors {activeTab === index
-            ? 'border-accent text-accent'
+            ? 'border-accent text-text-primary'
             : 'border-transparent text-text-secondary hover:text-text-primary'}"
         >
           {tab}
@@ -219,7 +219,7 @@
                 }
                 handleChange();
               }}
-              class="w-4 h-4 rounded border-border text-accent focus:ring-accent"
+              class="w-4 h-4 rounded border-border text-text-primary focus:ring-accent"
             />
           </label>
 
@@ -233,7 +233,7 @@
               bind:checked={config.hangupAfterBridge}
               onchange={handleChange}
               disabled={config.transferAfterConnect}
-              class="w-4 h-4 rounded border-border text-accent focus:ring-accent disabled:opacity-50"
+              class="w-4 h-4 rounded border-border text-text-primary focus:ring-accent disabled:opacity-50"
             />
           </label>
         </div>
@@ -251,7 +251,7 @@
             type="checkbox"
             bind:checked={config.screen}
             onchange={handleChange}
-            class="w-4 h-4 rounded border-border text-accent focus:ring-accent"
+            class="w-4 h-4 rounded border-border text-text-primary focus:ring-accent"
           />
         </label>
 
@@ -296,7 +296,7 @@
             type="checkbox"
             bind:checked={config.camp.enabled}
             onchange={handleChange}
-            class="w-4 h-4 rounded border-border text-accent focus:ring-accent"
+            class="w-4 h-4 rounded border-border text-text-primary focus:ring-accent"
           />
         </label>
 

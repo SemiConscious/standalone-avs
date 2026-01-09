@@ -1,95 +1,15 @@
-import { querySalesforce, hasValidCredentials } from '$lib/server/salesforce';
+/**
+ * My Profile Page Server
+ * 
+ * Uses repository pattern for platform-agnostic data loading.
+ * Note: Sapien API calls for call logs remain as external API integrations.
+ */
+
+import { tryCreateContextAndRepositories, isSalesforceContext } from '$lib/adapters';
 import { getCallLogs } from '$lib/server/sapien';
 import { getOrganizationId, getSapienAccessToken, getSapienHost } from '$lib/server/gatekeeper';
 import { env } from '$env/dynamic/private';
 import type { PageServerLoad } from './$types';
-
-interface SalesforceUser {
-  Id: string;
-  Name: string;
-  nbavs__Id__c: string;
-  nbavs__SipExtension__c: string;
-  nbavs__MobilePhone__c: string;
-  nbavs__CTI__c: boolean;
-  nbavs__PBX__c: boolean;
-  nbavs__Manager__c: boolean;
-  nbavs__Record__c: boolean;
-  nbavs__PCI__c: boolean;
-  nbavs__Insights__c: boolean;
-}
-
-interface SalesforceUserSettings {
-  Id: string;
-  nbavs__CountryCode__c: string;
-  nbavs__CountryCodeLabel__c: string;
-  nbavs__Voice__c: string;
-  nbavs__VoiceLabel__c: string;
-  nbavs__TimeZone__c: string;
-}
-
-interface SalesforceGroupMember {
-  Id: string;
-  nbavs__Group__r: {
-    Id: string;
-    Name: string;
-    nbavs__Extension__c: string;
-    nbavs__GroupPickup__c: string;
-    nbavs__PBX__c: boolean;
-    nbavs__Manager__c: boolean;
-  };
-  nbavs__Primary__c: boolean;
-}
-
-interface SalesforceDevice {
-  Id: string;
-  Name: string;
-  nbavs__Number__c: string;
-  nbavs__Type__c: string;
-  nbavs__Enabled__c: boolean;
-  nbavs__Registered__c: boolean;
-}
-
-interface SalesforceRegisteredNumber {
-  Id: string;
-  Name: string;
-  nbavs__CallQueueEnabled__c: boolean;
-  nbavs__CallQueueMaster__c: boolean;
-  nbavs__Enabled__c: boolean;
-  nbavs__Type__c: string;
-}
-
-interface SalesforceUserRingTarget {
-  Id: string;
-  nbavs__Number__c: string;
-  nbavs__Enabled__c: boolean;
-  nbavs__Source__c: string;
-  nbavs__Priority__c: number;
-}
-
-interface SalesforceUserPolicy {
-  Id: string;
-  nbavs__UserRingTargets__r?: {
-    records: SalesforceUserRingTarget[];
-  };
-}
-
-interface SalesforceVoicemail {
-  Id: string;
-  nbavs__UUID__c: string;
-  nbavs__CallStart__c: string;
-  nbavs__DialledNumber__c: string;
-  nbavs__TotalDuration__c: number;
-  nbavs__VMStatus__c: boolean;
-}
-
-interface SalesforceCallLog {
-  Id: string;
-  nbavs__DateTime__c: string;
-  nbavs__FromNumber__c: string;
-  nbavs__ToNumber__c: string;
-  nbavs__TimeTalking__c: number;
-  nbavs__Direction__c: string;
-}
 
 export interface UserGroup {
   id: string;
@@ -246,252 +166,115 @@ const DEMO_DATA: UserProfileData = {
 };
 
 export const load: PageServerLoad = async ({ locals }) => {
-  // Demo mode
-  if (env.DEMO_MODE === 'true' || env.DEMO_MODE === '1') {
+  const result = tryCreateContextAndRepositories(locals);
+
+  if (!result) {
     return { data: DEMO_DATA };
   }
 
-  // Check credentials
-  if (!hasValidCredentials(locals)) {
-    return { data: { ...DEMO_DATA, isDemo: false, user: null, error: 'Not authenticated' } };
+  const { repos, isDemo, ctx } = result;
+
+  if (isDemo) {
+    return { data: DEMO_DATA };
   }
 
   try {
-    // First, find the AVS User record for the current Salesforce user
-    const sfUserId = locals.user?.id;
+    // Get the current Salesforce user ID
+    const sfUserId = locals.user?.id || locals.salesforce?.user?.id;
     if (!sfUserId) {
       return { data: { ...DEMO_DATA, isDemo: false, user: null, error: 'User not found' } };
     }
 
-    // Get AVS User by Salesforce User ID
-    const userResult = await querySalesforce<SalesforceUser>(
-      locals.instanceUrl!,
-      locals.accessToken!,
-      `SELECT Id, Name, nbavs__Id__c, nbavs__SipExtension__c, nbavs__MobilePhone__c,
-              nbavs__CTI__c, nbavs__PBX__c, nbavs__Manager__c, nbavs__Record__c, 
-              nbavs__PCI__c, nbavs__Insights__c
-       FROM nbavs__User__c 
-       WHERE nbavs__User__c = '${sfUserId}' 
-       LIMIT 1`
-    );
-
-    const avsUser = userResult.records[0];
+    // Get AVS User by Salesforce User ID using repository
+    const avsUser = await repos.users.findBySalesforceUserId(sfUserId);
     if (!avsUser) {
       return { data: { ...DEMO_DATA, isDemo: false, user: null, error: 'AVS User profile not found' } };
     }
-    
-    // Debug: Log license values
-    console.log('[my-profile] User licenses from Salesforce:', {
-      cti: avsUser.nbavs__CTI__c,
-      pbx: avsUser.nbavs__PBX__c,
-      manager: avsUser.nbavs__Manager__c,
-      record: avsUser.nbavs__Record__c,
-      pci: avsUser.nbavs__PCI__c,
-      insights: avsUser.nbavs__Insights__c,
-    });
 
-    // Fetch user settings, groups, devices, voicemails, and recent calls in parallel
-    const [userSettingsResult, groupsResult, devicesResult, registeredNumbersResult, voicemailsResult, phoneNumbersResult, userPolicyResult] = await Promise.all([
-      // User Settings (for home country and default voice)
-      querySalesforce<SalesforceUserSettings>(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        `SELECT Id, nbavs__CountryCode__c, nbavs__CountryCodeLabel__c, nbavs__Voice__c, nbavs__VoiceLabel__c, nbavs__TimeZone__c
-         FROM nbavs__UserSettings__c 
-         WHERE nbavs__User__c = '${avsUser.Id}'
-         LIMIT 1`
-      ).catch(() => ({ records: [] as SalesforceUserSettings[], totalSize: 0, done: true })),
+    // Fetch profile data using repository
+    const profileData = await repos.users.getProfileData(avsUser.id);
 
-      // Groups
-      querySalesforce<SalesforceGroupMember>(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        `SELECT Id, nbavs__Primary__c, 
-                nbavs__Group__r.Id, nbavs__Group__r.Name, 
-                nbavs__Group__r.nbavs__Extension__c, nbavs__Group__r.nbavs__GroupPickup__c,
-                nbavs__Group__r.nbavs__PBX__c, nbavs__Group__r.nbavs__Manager__c
-         FROM nbavs__GroupMember__c 
-         WHERE nbavs__User__c = '${avsUser.Id}'
-         ORDER BY nbavs__Primary__c DESC`
-      ).catch(() => ({ records: [] as SalesforceGroupMember[], totalSize: 0, done: true })),
-
-      // Devices (UserDevice__c - may not exist in all orgs)
-      querySalesforce<SalesforceDevice>(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        `SELECT Id, Name, nbavs__Number__c, nbavs__Type__c, nbavs__Enabled__c, nbavs__Registered__c
-         FROM nbavs__UserDevice__c 
-         WHERE nbavs__User__c = '${avsUser.Id}'`
-      ).catch(() => ({ records: [] as SalesforceDevice[], totalSize: 0, done: true })),
-
-      // Registered Numbers (for active inbound numbers - CallQueueMaster = true)
-      querySalesforce<SalesforceRegisteredNumber>(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        `SELECT Id, Name, nbavs__CallQueueEnabled__c, nbavs__CallQueueMaster__c, nbavs__Enabled__c, nbavs__Type__c
-         FROM nbavs__RegisteredNumber__c 
-         WHERE nbavs__User__c = '${avsUser.Id}' AND nbavs__CallQueueMaster__c = true`
-      ).catch(() => ({ records: [] as SalesforceRegisteredNumber[], totalSize: 0, done: true })),
-
-      // Voicemails (last 5)
-      querySalesforce<SalesforceVoicemail>(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        `SELECT Id, nbavs__UUID__c, nbavs__CallStart__c, nbavs__DialledNumber__c, 
-                nbavs__TotalDuration__c, nbavs__VMStatus__c
-         FROM nbavs__Voicemail__c 
-         WHERE nbavs__User__c = '${avsUser.Id}'
-         ORDER BY nbavs__CallStart__c DESC
-         LIMIT 5`
-      ).catch(() => ({ records: [] as SalesforceVoicemail[], totalSize: 0, done: true })),
-
-      // User's DDIs
-      querySalesforce<{ nbavs__Number__c: string }>(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        `SELECT nbavs__Number__c 
-         FROM nbavs__PhoneNumber__c 
-         WHERE nbavs__User__c = '${avsUser.Id}'`
-      ).catch(() => ({ records: [] as { nbavs__Number__c: string }[], totalSize: 0, done: true })),
-
-      // User Ring Order Policy with Ring Targets (for "My active inbound numbers")
-      // This is how avs-sfdx fetches the device list via UserRingOrderController
-      querySalesforce<SalesforceUserPolicy>(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        `SELECT Id, 
-                (SELECT Id, nbavs__Number__c, nbavs__Enabled__c, nbavs__Source__c, nbavs__Priority__c
-                 FROM nbavs__UserRingTargets__r 
-                 ORDER BY nbavs__Priority__c ASC)
-         FROM nbavs__UserPolicy__c 
-         WHERE nbavs__User__c = '${avsUser.Id}' AND nbavs__Template__c = 'RINGORDER'
-         LIMIT 1`
-      ).catch(() => ({ records: [] as SalesforceUserPolicy[], totalSize: 0, done: true })),
-    ]);
-
-    // Fetch call logs from Sapien API
+    // Fetch call logs from Sapien API (external integration - not part of repository pattern)
     let callLogs: CallLog[] = [];
     let lastCallDate: string | null = null;
 
-    try {
-      // Get the Sapien access token directly (NOT a scoped JWT)
-      // This is how avs-sfdx RestClient works - uses the OAuth access_token for general Sapien API calls
-      const sapienAccessToken = await getSapienAccessToken(locals.instanceUrl!, locals.accessToken!);
-      const sapienUserId = avsUser.nbavs__Id__c ? parseInt(avsUser.nbavs__Id__c, 10) : null;
-      const organizationId = getOrganizationId();
-      const sapienHost = getSapienHost() || env.SAPIEN_HOST;
-      console.log('[my-profile] Using Sapien host:', sapienHost);
-      console.log('[my-profile] Using Sapien access token (first 30 chars):', sapienAccessToken?.slice(0, 30));
+    if (isSalesforceContext(ctx)) {
+      try {
+        const sapienAccessToken = await getSapienAccessToken(ctx.instanceUrl, ctx.accessToken);
+        const sapienUserId = avsUser.platformId;
+        const organizationId = getOrganizationId();
+        const sapienHost = getSapienHost() || env.SAPIEN_HOST;
 
-      if (sapienUserId && organizationId && sapienHost) {
-        // Use Sapien access token (not JWT) for call logs - same as RestClient in avs-sfdx
-        const sapienCallLogs = await getCallLogs(sapienHost, sapienAccessToken, organizationId, sapienUserId, 10);
+        if (sapienUserId && organizationId && sapienHost) {
+          const sapienCallLogs = await getCallLogs(sapienHost, sapienAccessToken, organizationId, sapienUserId, 10);
 
-        // Transform Sapien call logs to our format
-        callLogs = sapienCallLogs.map((cl, index) => ({
-          id: String(cl.id || index),
-          dateTime: cl.timeStart ? formatDateTime(cl.timeStart) : '',
-          fromNumber: cl.fromNumber || '',
-          toNumber: cl.toNumber || '',
-          duration: formatDuration(cl.timeTalking ?? null),
-          direction: cl.direction || '',
-        }));
+          callLogs = sapienCallLogs.map((cl, index) => ({
+            id: String(cl.id || index),
+            dateTime: cl.timeStart ? formatDateTime(cl.timeStart) : '',
+            fromNumber: cl.fromNumber || '',
+            toNumber: cl.toNumber || '',
+            duration: formatDuration(cl.timeTalking ?? null),
+            direction: cl.direction || '',
+          }));
 
-        // Get last call date
-        const firstCallLog = sapienCallLogs[0];
-        if (firstCallLog?.timeStart) {
-          lastCallDate = getRelativeTime(firstCallLog.timeStart);
+          const firstCallLog = sapienCallLogs[0];
+          if (firstCallLog?.timeStart) {
+            lastCallDate = getRelativeTime(firstCallLog.timeStart);
+          }
         }
-      }
-    } catch (error) {
-      console.error('Failed to fetch call logs from Sapien:', error);
-      // Continue without call logs - not a fatal error
-    }
-
-    // Build active inbound numbers from TWO sources (same as avs-sfdx MyUserController):
-    // 1. UserRingTarget__c records from UserPolicy (ring order targets)
-    // 2. RegisteredNumber__c records with CallQueueMaster = true (excluding those already in ring targets)
-    const activeInboundNumbers: { number: string; enabled: boolean }[] = [];
-    const ringTargetNumbers = new Set<string>();
-
-    // First, add ring targets from UserPolicy
-    const userPolicy = userPolicyResult.records[0];
-    if (userPolicy?.nbavs__UserRingTargets__r?.records) {
-      for (const rt of userPolicy.nbavs__UserRingTargets__r.records) {
-        if (rt.nbavs__Number__c) {
-          activeInboundNumbers.push({
-            number: rt.nbavs__Number__c,
-            enabled: rt.nbavs__Enabled__c || false,
-          });
-          ringTargetNumbers.add(rt.nbavs__Number__c);
-        }
+      } catch (error) {
+        console.error('Failed to fetch call logs from Sapien:', error);
+        // Continue without call logs - not a fatal error
       }
     }
-
-    // Then add RegisteredNumber__c records that are NOT already in ring targets
-    for (const rn of registeredNumbersResult.records) {
-      if (rn.Name && !ringTargetNumbers.has(rn.Name)) {
-        activeInboundNumbers.push({
-          number: rn.Name,
-          enabled: rn.nbavs__CallQueueEnabled__c || false,
-        });
-      }
-    }
-
-    console.log('[my-profile] Active inbound numbers:', activeInboundNumbers.length, 'items');
-
-    // Get user settings
-    const userSettings = userSettingsResult.records[0];
 
     const data: UserProfileData = {
       user: {
-        id: avsUser.Id,
-        name: avsUser.Name || '',
-        sapienId: avsUser.nbavs__Id__c || '',
-        extension: avsUser.nbavs__SipExtension__c || '',
-        mobilePhone: avsUser.nbavs__MobilePhone__c || '',
-        homeCountry: userSettings?.nbavs__CountryCodeLabel__c
-          ? `${userSettings.nbavs__CountryCodeLabel__c} (+${userSettings.nbavs__CountryCode__c || ''})`
-          : '',
-        homeCountryCode: userSettings?.nbavs__CountryCode__c || '',
-        defaultVoice: userSettings?.nbavs__VoiceLabel__c || '',
+        id: avsUser.id,
+        name: avsUser.name,
+        sapienId: avsUser.platformId ? String(avsUser.platformId) : '',
+        extension: avsUser.sipExtension || '',
+        mobilePhone: avsUser.mobilePhone || '',
+        homeCountry: profileData.homeCountry || '',
+        homeCountryCode: profileData.homeCountryCode || '',
+        defaultVoice: profileData.defaultVoice || '',
         licenses: {
-          cti: avsUser.nbavs__CTI__c || false,
-          pbx: avsUser.nbavs__PBX__c || false,
-          manager: avsUser.nbavs__Manager__c || false,
-          record: avsUser.nbavs__Record__c || false,
-          pci: avsUser.nbavs__PCI__c || false,
-          insights: avsUser.nbavs__Insights__c || false,
+          cti: avsUser.licenses.cti,
+          pbx: avsUser.licenses.pbx,
+          manager: avsUser.licenses.manager,
+          record: avsUser.licenses.record,
+          pci: avsUser.licenses.pci,
+          insights: avsUser.licenses.insights,
         },
       },
-      groups: groupsResult.records.map((gm) => ({
-        id: gm.nbavs__Group__r?.Id || '',
-        name: gm.nbavs__Group__r?.Name || '',
-        extension: gm.nbavs__Group__r?.nbavs__Extension__c || '',
-        groupPickup: gm.nbavs__Group__r?.nbavs__GroupPickup__c || '',
-        isPrimary: gm.nbavs__Primary__c || false,
-        hasPbxOrManager: (gm.nbavs__Group__r?.nbavs__PBX__c || gm.nbavs__Group__r?.nbavs__Manager__c) || false,
+      groups: profileData.groups.map(g => ({
+        id: g.id,
+        name: g.name,
+        extension: g.extension || '',
+        groupPickup: g.groupPickup || '',
+        isPrimary: g.isPrimary,
+        hasPbxOrManager: g.hasPbxOrManager,
       })),
-      devices: devicesResult.records.map((d) => ({
-        id: d.Id,
-        name: d.Name || '',
-        number: d.nbavs__Number__c || '',
-        type: d.nbavs__Type__c || '',
-        isEnabled: d.nbavs__Enabled__c || false,
-        isRegistered: d.nbavs__Registered__c || false,
+      devices: profileData.devices.map(d => ({
+        id: d.id,
+        name: d.name,
+        number: d.number || '',
+        type: d.type || '',
+        isEnabled: d.isEnabled,
+        isRegistered: d.isRegistered,
       })),
-      activeInboundNumbers,
-      voicemails: voicemailsResult.records.map((vm) => ({
-        id: vm.Id,
-        uuid: vm.nbavs__UUID__c || '',
-        dateTime: formatDateTime(vm.nbavs__CallStart__c),
-        dialledNumber: vm.nbavs__DialledNumber__c || '',
-        duration: formatDuration(vm.nbavs__TotalDuration__c),
-        canPlay: vm.nbavs__VMStatus__c || false,
+      activeInboundNumbers: profileData.activeInboundNumbers,
+      voicemails: profileData.voicemails.map(vm => ({
+        id: vm.id,
+        uuid: vm.uuid,
+        dateTime: formatDateTime(vm.dateTime),
+        dialledNumber: vm.dialledNumber,
+        duration: formatDuration(vm.duration),
+        canPlay: vm.canPlay,
       })),
       recentCalls: callLogs,
       lastCallDate,
-      ddis: phoneNumbersResult.records.map((pn) => `+${pn.nbavs__Number__c}`),
+      ddis: profileData.ddis,
       isDemo: false,
     };
 

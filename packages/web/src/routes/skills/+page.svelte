@@ -155,7 +155,7 @@
     <Card class="flex-1 min-w-[200px]">
       <div class="flex items-center gap-3">
         <div class="p-3 bg-accent/10 rounded-base">
-          <Award class="w-6 h-6 text-accent" />
+          <Award class="w-6 h-6 text-text-primary" />
         </div>
         <div>
           <p class="text-2xl font-bold">{data.skills.length}</p>

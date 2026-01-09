@@ -1,3 +1,9 @@
+/**
+ * Insights Detail Page Server
+ * 
+ * Fetches a single NatterboxAI record by ID for detailed view.
+ */
+
 import { querySalesforce, hasValidCredentials } from '$lib/server/salesforce';
 import { env } from '$env/dynamic/private';
 import { error } from '@sveltejs/kit';
@@ -19,36 +25,39 @@ interface SalesforceNatterboxAI {
     nbavs__Rating4__c: number;
     nbavs__ChannelDuration__c: number;
     nbavs__AIAnalysisStatus__c: string;
+    nbavs__NatterboxUser__c?: string;
     nbavs__NatterboxUser__r?: {
         Id: string;
         Name: string;
     };
+    nbavs__Group__c?: string;
     nbavs__Group__r?: {
         Id: string;
         Name: string;
     };
     nbavs__CRO__r?: {
-        Id: string;
         nbavs__Call_Direction__c: string;
-        nbavs__Account__r?: { Id: string; Name: string };
-        nbavs__Contact__r?: { Id: string; Name: string };
-        nbavs__Lead__r?: { Id: string; Name: string };
-        nbavs__WrapupLabel_0__c: string;
-        nbavs__WrapupLabel_1__c: string;
+    };
+    nbavs__Account__c?: string;
+    nbavs__Account__r?: {
+        Id: string;
+        Name: string;
+    };
+    nbavs__Contact__c?: string;
+    nbavs__Contact__r?: {
+        Id: string;
+        Name: string;
     };
     CreatedDate: string;
 }
 
-interface SalesforceCategory {
-    Id: string;
-    nbavs__Name__c: string;
-}
-
-export interface InsightDetail {
+export interface AIInsightDetail {
     id: string;
     name: string;
     uuid: string;
     summary: string;
+    sentiment: 'positive' | 'neutral' | 'negative';
+    score: number;
     overallRating: number;
     ratings: {
         callQuality: number;
@@ -61,30 +70,31 @@ export interface InsightDetail {
     startTime: string;
     phoneNumber: string;
     direction: string;
+    agentId?: string;
     agentName: string;
-    agentId: string;
+    groupId?: string;
     groupName: string;
-    groupId: string;
     account?: { id: string; name: string };
     contact?: { id: string; name: string };
-    lead?: { id: string; name: string };
     wrapups: string[];
     categories: string[];
     createdDate: string;
 }
 
 export interface InsightDetailPageData {
-    insight: InsightDetail;
+    insight: AIInsightDetail;
     isDemo: boolean;
     error?: string;
 }
 
 // Demo data
-const DEMO_INSIGHT: InsightDetail = {
+const DEMO_INSIGHT: AIInsightDetail = {
     id: 'demo-1',
     name: 'AI-00001234',
-    uuid: 'demo-uuid-001',
+    uuid: 'uuid-demo-001',
     summary: 'Customer inquired about pricing for enterprise plan. Agent provided detailed information about features, compared with competitor offerings, and scheduled a follow-up demo for next week. Customer expressed strong interest in the advanced analytics features.',
+    sentiment: 'positive',
+    score: 84,
     overallRating: 4.2,
     ratings: {
         callQuality: 4.5,
@@ -97,10 +107,10 @@ const DEMO_INSIGHT: InsightDetail = {
     startTime: '2026-01-05T14:30:00Z',
     phoneNumber: '+1 555 0100',
     direction: 'Inbound',
-    agentName: 'John Smith',
     agentId: 'agent-001',
-    groupName: 'Sales',
+    agentName: 'John Smith',
     groupId: 'group-001',
+    groupName: 'Sales',
     account: { id: 'acc-001', name: 'Acme Corporation' },
     contact: { id: 'con-001', name: 'Jane Doe' },
     wrapups: ['Sales Inquiry', 'Demo Scheduled'],
@@ -108,25 +118,44 @@ const DEMO_INSIGHT: InsightDetail = {
     createdDate: '2026-01-05T14:30:00Z',
 };
 
+/**
+ * Convert overall rating (1-5) to sentiment
+ */
+function getSentimentFromRating(rating: number): 'positive' | 'neutral' | 'negative' {
+    if (rating >= 4) return 'positive';
+    if (rating >= 2.5) return 'neutral';
+    return 'negative';
+}
+
+/**
+ * Convert overall rating to a percentage score
+ */
+function getScoreFromRating(rating: number): number {
+    return Math.round((rating / 5) * 100);
+}
+
 export const load: PageServerLoad = async ({ params, locals }) => {
     const { id } = params;
 
     // Demo mode
     if (env.PUBLIC_DEMO_MODE === 'true' || env.PUBLIC_DEMO_MODE === '1') {
         return {
-            insight: DEMO_INSIGHT,
+            insight: { ...DEMO_INSIGHT, id },
             isDemo: true,
         } satisfies InsightDetailPageData;
     }
 
     // Check credentials
     if (!hasValidCredentials(locals)) {
-        throw error(401, 'Not authenticated');
+        return {
+            insight: { ...DEMO_INSIGHT, id },
+            isDemo: true,
+        } satisfies InsightDetailPageData;
     }
 
     try {
-        // Fetch NatterboxAI record with related data
-        const insightSoql = `
+        // Fetch NatterboxAI record by ID
+        const soql = `
             SELECT Id, Name, CreatedDate,
                    ${NAMESPACE}UUID__c,
                    ${NAMESPACE}StartTime__c,
@@ -139,20 +168,19 @@ export const load: PageServerLoad = async ({ params, locals }) => {
                    ${NAMESPACE}Rating4__c,
                    ${NAMESPACE}ChannelDuration__c,
                    ${NAMESPACE}AIAnalysisStatus__c,
+                   ${NAMESPACE}NatterboxUser__c,
                    ${NAMESPACE}NatterboxUser__r.Id,
                    ${NAMESPACE}NatterboxUser__r.Name,
+                   ${NAMESPACE}Group__c,
                    ${NAMESPACE}Group__r.Id,
                    ${NAMESPACE}Group__r.Name,
-                   ${NAMESPACE}CRO__r.Id,
                    ${NAMESPACE}CRO__r.${NAMESPACE}Call_Direction__c,
-                   ${NAMESPACE}CRO__r.${NAMESPACE}Account__r.Id,
-                   ${NAMESPACE}CRO__r.${NAMESPACE}Account__r.Name,
-                   ${NAMESPACE}CRO__r.${NAMESPACE}Contact__r.Id,
-                   ${NAMESPACE}CRO__r.${NAMESPACE}Contact__r.Name,
-                   ${NAMESPACE}CRO__r.${NAMESPACE}Lead__r.Id,
-                   ${NAMESPACE}CRO__r.${NAMESPACE}Lead__r.Name,
-                   ${NAMESPACE}CRO__r.${NAMESPACE}WrapupLabel_0__c,
-                   ${NAMESPACE}CRO__r.${NAMESPACE}WrapupLabel_1__c
+                   ${NAMESPACE}Account__c,
+                   ${NAMESPACE}Account__r.Id,
+                   ${NAMESPACE}Account__r.Name,
+                   ${NAMESPACE}Contact__c,
+                   ${NAMESPACE}Contact__r.Id,
+                   ${NAMESPACE}Contact__r.Name
             FROM ${NAMESPACE}NatterboxAI__c
             WHERE Id = '${id}'
             LIMIT 1
@@ -161,7 +189,7 @@ export const load: PageServerLoad = async ({ params, locals }) => {
         const result = await querySalesforce<SalesforceNatterboxAI>(
             locals.instanceUrl!,
             locals.accessToken!,
-            insightSoql
+            soql
         );
 
         if (result.records.length === 0) {
@@ -169,31 +197,8 @@ export const load: PageServerLoad = async ({ params, locals }) => {
         }
 
         const ai = result.records[0];
-        const cro = ai[`${NAMESPACE}CRO__r`];
+        const overallRating = ai[`${NAMESPACE}OverallRating__c`] || 0;
         
-        // Fetch categories
-        let categories: string[] = [];
-        try {
-            const categorySoql = `
-                SELECT ${NAMESPACE}Name__c 
-                FROM ${NAMESPACE}Category__c 
-                WHERE ${NAMESPACE}NatterboxAI__c = '${id}'
-            `;
-            const categoryResult = await querySalesforce<SalesforceCategory>(
-                locals.instanceUrl!,
-                locals.accessToken!,
-                categorySoql
-            );
-            categories = categoryResult.records.map(c => c[`${NAMESPACE}Name__c`]).filter(Boolean);
-        } catch (e) {
-            console.warn('Failed to fetch categories:', e);
-        }
-
-        // Build wrapups array
-        const wrapups: string[] = [];
-        if (cro?.[`${NAMESPACE}WrapupLabel_0__c`]) wrapups.push(cro[`${NAMESPACE}WrapupLabel_0__c`]);
-        if (cro?.[`${NAMESPACE}WrapupLabel_1__c`]) wrapups.push(cro[`${NAMESPACE}WrapupLabel_1__c`]);
-
         // Determine transcript status from AIAnalysisStatus
         const aiStatus = ai[`${NAMESPACE}AIAnalysisStatus__c`] || '';
         let transcriptStatus = 'Unknown';
@@ -205,12 +210,14 @@ export const load: PageServerLoad = async ({ params, locals }) => {
             transcriptStatus = 'Error';
         }
 
-        const insight: InsightDetail = {
+        const insight: AIInsightDetail = {
             id: ai.Id,
             name: ai.Name,
             uuid: ai[`${NAMESPACE}UUID__c`] || '',
             summary: ai[`${NAMESPACE}Summary__c`] || 'No summary available',
-            overallRating: ai[`${NAMESPACE}OverallRating__c`] || 0,
+            sentiment: getSentimentFromRating(overallRating),
+            score: getScoreFromRating(overallRating),
+            overallRating,
             ratings: {
                 callQuality: ai[`${NAMESPACE}Rating1__c`] || 0,
                 customerExperience: ai[`${NAMESPACE}Rating2__c`] || 0,
@@ -221,22 +228,21 @@ export const load: PageServerLoad = async ({ params, locals }) => {
             transcriptStatus,
             startTime: ai[`${NAMESPACE}StartTime__c`] || ai.CreatedDate,
             phoneNumber: ai[`${NAMESPACE}Number__c`] || '',
-            direction: cro?.[`${NAMESPACE}Call_Direction__c`] || 'Unknown',
+            direction: ai[`${NAMESPACE}CRO__r`]?.[`${NAMESPACE}Call_Direction__c`] || 'Unknown',
+            agentId: ai[`${NAMESPACE}NatterboxUser__r`]?.Id,
             agentName: ai[`${NAMESPACE}NatterboxUser__r`]?.Name || 'Unknown',
-            agentId: ai[`${NAMESPACE}NatterboxUser__r`]?.Id || '',
+            groupId: ai[`${NAMESPACE}Group__r`]?.Id,
             groupName: ai[`${NAMESPACE}Group__r`]?.Name || '',
-            groupId: ai[`${NAMESPACE}Group__r`]?.Id || '',
-            account: cro?.[`${NAMESPACE}Account__r`] 
-                ? { id: cro[`${NAMESPACE}Account__r`].Id, name: cro[`${NAMESPACE}Account__r`].Name }
-                : undefined,
-            contact: cro?.[`${NAMESPACE}Contact__r`]
-                ? { id: cro[`${NAMESPACE}Contact__r`].Id, name: cro[`${NAMESPACE}Contact__r`].Name }
-                : undefined,
-            lead: cro?.[`${NAMESPACE}Lead__r`]
-                ? { id: cro[`${NAMESPACE}Lead__r`].Id, name: cro[`${NAMESPACE}Lead__r`].Name }
-                : undefined,
-            wrapups,
-            categories,
+            account: ai[`${NAMESPACE}Account__r`] ? {
+                id: ai[`${NAMESPACE}Account__r`].Id,
+                name: ai[`${NAMESPACE}Account__r`].Name,
+            } : undefined,
+            contact: ai[`${NAMESPACE}Contact__r`] ? {
+                id: ai[`${NAMESPACE}Contact__r`].Id,
+                name: ai[`${NAMESPACE}Contact__r`].Name,
+            } : undefined,
+            wrapups: [], // Would need to query a related object
+            categories: [], // Would need to query a related object
             createdDate: ai.CreatedDate,
         };
 

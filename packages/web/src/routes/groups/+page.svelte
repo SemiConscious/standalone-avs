@@ -142,7 +142,7 @@
       {#snippet cell(column, row)}
         {#if column.key === 'actions'}
           <div class="flex items-center gap-1">
-            <a href="/groups/{row.id}" class="text-primary-400 hover:text-primary-300 hover:underline text-sm">
+            <a href="/groups/{row.id}" class="text-text-primary hover:text-primary-300 hover:underline text-sm">
               Edit
             </a>
             <span class="text-text-secondary">|</span>
@@ -171,14 +171,14 @@
                   e.stopPropagation();
                   showDeleteConfirm = String(row.id);
                 }}
-                class="text-primary-400 hover:text-primary-300 hover:underline text-sm"
+                class="text-text-primary hover:text-primary-300 hover:underline text-sm"
               >
                 Del
               </button>
             {/if}
           </div>
         {:else if column.key === 'name'}
-          <a href="/groups/{row.id}" class="text-primary-400 hover:text-primary-300 hover:underline font-medium">
+          <a href="/groups/{row.id}" class="text-text-primary hover:text-primary-300 hover:underline font-medium">
             {row.name}
           </a>
           {#if row.memberCount !== undefined}
@@ -186,7 +186,7 @@
           {/if}
         {:else if column.key === 'email'}
           {#if row.email}
-            <a href="mailto:{row.email}" class="text-primary-400 hover:text-primary-300 hover:underline flex items-center gap-1">
+            <a href="mailto:{row.email}" class="text-text-primary hover:text-primary-300 hover:underline flex items-center gap-1">
               <Mail class="w-3 h-3" />
               {row.email}
             </a>

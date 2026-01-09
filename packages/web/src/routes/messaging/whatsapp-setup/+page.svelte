@@ -11,7 +11,7 @@
   <!-- Page Header -->
   <div>
     <nav class="text-sm text-text-secondary mb-2">
-      <a href="/messaging" class="hover:text-primary-400 inline-flex items-center gap-1">
+      <a href="/messaging" class="hover:text-text-primary inline-flex items-center gap-1">
         <ArrowLeft class="w-4 h-4" />
         Back to Messaging
       </a>

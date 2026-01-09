@@ -11,7 +11,7 @@
   <!-- Page Header -->
   <div class="flex items-center gap-3">
     <div class="p-3 bg-primary-500/10 rounded-base">
-      <Sparkles class="w-6 h-6 text-primary-400" />
+      <Sparkles class="w-6 h-6 text-text-primary" />
     </div>
     <div>
       <h1 class="text-2xl font-bold text-text-primary">AI Advisor</h1>
@@ -33,7 +33,7 @@
       </p>
       <a 
         href="/insights" 
-        class="inline-flex items-center gap-2 text-primary-400 hover:text-primary-300 transition-colors"
+        class="inline-flex items-center gap-2 text-text-primary hover:text-primary-300 transition-colors"
       >
         View Call Insights
         <ArrowRight class="w-4 h-4" />
@@ -46,7 +46,7 @@
     <Card>
       <div class="text-center p-4">
         <div class="w-10 h-10 bg-primary-500/10 rounded-full flex items-center justify-center mx-auto mb-3">
-          <Sparkles class="w-5 h-5 text-primary-400" />
+          <Sparkles class="w-5 h-5 text-text-primary" />
         </div>
         <h3 class="font-medium text-text-primary mb-1">Smart Analysis</h3>
         <p class="text-sm text-text-secondary">AI-powered analysis of call transcriptions and patterns</p>

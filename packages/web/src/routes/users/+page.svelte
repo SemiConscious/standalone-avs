@@ -237,7 +237,7 @@
               {getInitials(String(row.name))}
             </div>
             <div class="min-w-0">
-              <span class="font-medium text-primary-400 hover:text-primary-300 text-sm block truncate">{row.name}</span>
+              <span class="font-medium text-text-primary hover:text-primary-300 text-sm block truncate">{row.name}</span>
               <p class="text-xs text-text-secondary truncate">{row.username || 'No username'}</p>
             </div>
           </div>
@@ -255,7 +255,7 @@
           {@const licenses = row.licenses as User['licenses']}
           <div class="flex flex-wrap gap-0.5">
             {#if licenses.cti}
-              <span class="inline-flex items-center justify-center w-5 h-5 rounded bg-accent/10 text-accent" title="CTI">
+              <span class="inline-flex items-center justify-center w-5 h-5 rounded bg-accent/10 text-text-primary" title="CTI">
                 <Headphones class="w-3 h-3" />
               </span>
             {/if}

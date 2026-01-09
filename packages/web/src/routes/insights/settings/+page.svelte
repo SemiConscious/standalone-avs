@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { Card, Button, Badge } from '$lib/components/ui';
-  import { Sliders, Bot, FlaskConical, AlertCircle, Save, CheckCircle } from 'lucide-svelte';
-  import type { AIAdvisorSettings } from './+page.server';
+  import { Card, Button, Badge, Toggle } from '$lib/components/ui';
+  import { Sliders, Bot, FlaskConical, AlertCircle, Save, CheckCircle, Pencil, X, CheckCircle2, XCircle } from 'lucide-svelte';
+  import type { InsightsSettings } from './+page.server';
 
   interface Props {
     data: {
-      settings: AIAdvisorSettings;
+      settings: InsightsSettings;
       languages: { value: string; label: string }[];
       isDemo: boolean;
       error?: string;
@@ -14,13 +14,42 @@
 
   let { data }: Props = $props();
 
+  // Edit mode state
+  let isEditing = $state(false);
+
+  // Form state (initialized from data)
   let language = $state(data.settings.language);
   let summarizationEnabled = $state(data.settings.summarizationEnabled);
   let accessByRecordingAccess = $state(data.settings.accessByRecordingAccess);
   let endUserAccess = $state(data.settings.endUserAccess);
 
+  // UI state
   let saving = $state(false);
   let saveMessage = $state<string | null>(null);
+
+  function getLanguageLabel(value: string): string {
+    const lang = data.languages.find((l) => l.value === value);
+    return lang?.label ?? value;
+  }
+
+  function startEditing() {
+    // Reset form values to current settings
+    language = data.settings.language;
+    summarizationEnabled = data.settings.summarizationEnabled;
+    accessByRecordingAccess = data.settings.accessByRecordingAccess;
+    endUserAccess = data.settings.endUserAccess;
+    isEditing = true;
+    saveMessage = null;
+  }
+
+  function cancelEditing() {
+    isEditing = false;
+    // Reset form values
+    language = data.settings.language;
+    summarizationEnabled = data.settings.summarizationEnabled;
+    accessByRecordingAccess = data.settings.accessByRecordingAccess;
+    endUserAccess = data.settings.endUserAccess;
+  }
 
   async function handleSave() {
     saving = true;
@@ -40,6 +69,12 @@
 
       if (response.ok) {
         saveMessage = 'Settings saved successfully';
+        isEditing = false;
+        // Update the displayed settings
+        data.settings.language = language;
+        data.settings.summarizationEnabled = summarizationEnabled;
+        data.settings.accessByRecordingAccess = accessByRecordingAccess;
+        data.settings.endUserAccess = endUserAccess;
       } else {
         saveMessage = 'Failed to save settings';
       }
@@ -52,7 +87,7 @@
 </script>
 
 <svelte:head>
-  <title>AI Settings | Natterbox AVS</title>
+  <title>Insights Settings | Natterbox AVS</title>
 </svelte:head>
 
 <div class="space-y-6">
@@ -74,8 +109,16 @@
 
   <!-- Save Message -->
   {#if saveMessage}
-    <div class="bg-success/10 border border-success/20 text-success rounded-base p-4 flex items-center gap-3">
-      <CheckCircle class="w-5 h-5 flex-shrink-0" />
+    <div
+      class="rounded-base p-4 flex items-center gap-3 {saveMessage.includes('success')
+        ? 'bg-success/10 border border-success/20 text-success'
+        : 'bg-error/10 border border-error/20 text-error'}"
+    >
+      {#if saveMessage.includes('success')}
+        <CheckCircle class="w-5 h-5 flex-shrink-0" />
+      {:else}
+        <AlertCircle class="w-5 h-5 flex-shrink-0" />
+      {/if}
       <p class="text-sm">{saveMessage}</p>
     </div>
   {/if}
@@ -83,46 +126,84 @@
   <!-- Page Header -->
   <div class="flex items-center justify-between">
     <div>
-      <h1 class="text-2xl font-bold text-text-primary">AI Settings</h1>
+      <h1 class="text-2xl font-bold text-text-primary">Insights Settings</h1>
       <p class="text-text-secondary mt-1">Configure AI-powered call analysis and transcription settings</p>
     </div>
-    <Button variant="primary" onclick={handleSave} disabled={saving || data.isDemo}>
-      <Save class="w-4 h-4 mr-2" />
-      {saving ? 'Saving...' : 'Save Changes'}
-    </Button>
+    <div class="flex items-center gap-2">
+      {#if isEditing}
+        <Button variant="ghost" onclick={cancelEditing} disabled={saving}>
+          <X class="w-4 h-4 mr-2" />
+          Cancel
+        </Button>
+        <Button variant="primary" onclick={handleSave} disabled={saving || data.isDemo}>
+          <Save class="w-4 h-4 mr-2" />
+          {saving ? 'Saving...' : 'Save Changes'}
+        </Button>
+      {:else}
+        <Button variant="secondary" onclick={startEditing} disabled={data.isDemo}>
+          <Pencil class="w-4 h-4 mr-2" />
+          Edit
+        </Button>
+      {/if}
+    </div>
   </div>
 
   <!-- Configuration Sections -->
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Transcription Settings Card -->
     <Card>
       <div class="flex items-center gap-3 mb-4">
-        <div class="p-2 bg-primary-500/10 rounded-base">
-          <Bot class="w-6 h-6 text-primary-400" />
+        <div class="p-2 bg-accent/10 rounded-base">
+          <Bot class="w-6 h-6 text-text-primary" />
         </div>
         <h2 class="text-lg font-semibold text-text-primary">Transcription Settings</h2>
       </div>
       <div class="space-y-4">
+        <!-- Language -->
         <div>
-          <label class="text-sm font-medium text-text-secondary">Transcription Language</label>
-          <select class="input mt-1" bind:value={language} disabled={data.isDemo}>
-            {#each data.languages as lang}
-              <option value={lang.value}>{lang.label}</option>
-            {/each}
-          </select>
+          {#if isEditing}
+            <label for="language-select" class="text-sm font-medium text-text-secondary">Transcription Language</label>
+            <select id="language-select" class="input mt-1" bind:value={language}>
+              {#each data.languages as lang}
+                <option value={lang.value}>{lang.label}</option>
+              {/each}
+            </select>
+          {:else}
+            <p class="text-sm font-medium text-text-secondary">Transcription Language</p>
+            <p class="text-text-primary mt-1 font-medium">{getLanguageLabel(data.settings.language)}</p>
+          {/if}
         </div>
+
+        <!-- Provider (read-only) -->
         <div>
-          <label class="text-sm font-medium text-text-secondary">Transcription Provider</label>
+          <p class="text-sm font-medium text-text-secondary">Transcription Provider</p>
           <p class="text-text-primary mt-1 font-medium">{data.settings.provider}</p>
         </div>
-        <label class="flex items-center gap-3 cursor-pointer">
-          <input
-            type="checkbox"
-            class="w-4 h-4 rounded border-border"
-            bind:checked={summarizationEnabled}
-            disabled={data.isDemo}
-          />
-          <span>Enable Call Summarization</span>
-        </label>
+
+        <!-- Call Summarization -->
+        {#if isEditing}
+          <div class="flex items-center justify-between py-2">
+            <div>
+              <p class="text-sm font-medium text-text-primary">Call Summarization</p>
+              <p class="text-xs text-text-secondary">Automatically generate call summaries</p>
+            </div>
+            <Toggle bind:checked={summarizationEnabled} color="success" size="sm" />
+          </div>
+        {:else}
+          <div class="flex items-center gap-2">
+            {#if data.settings.summarizationEnabled}
+              <CheckCircle2 class="w-4 h-4 text-success" />
+            {:else}
+              <XCircle class="w-4 h-4 text-gray-500" />
+            {/if}
+            <div>
+              <span class="text-sm text-text-primary">Call Summarization</span>
+              <p class="text-xs text-text-secondary">Automatically generate call summaries</p>
+            </div>
+          </div>
+        {/if}
+
+        <!-- Insights Status -->
         <div class="pt-2 border-t border-border">
           <div class="flex items-center gap-2">
             <span class="text-sm text-text-secondary">Insights Status:</span>
@@ -136,38 +217,60 @@
       </div>
     </Card>
 
+    <!-- Access Control Card -->
     <Card>
       <div class="flex items-center gap-3 mb-4">
-        <div class="p-2 bg-primary-500/10 rounded-base">
-          <Sliders class="w-6 h-6 text-primary-400" />
+        <div class="p-2 bg-accent/10 rounded-base">
+          <Sliders class="w-6 h-6 text-text-primary" />
         </div>
         <h2 class="text-lg font-semibold text-text-primary">Access Control</h2>
       </div>
       <div class="space-y-4">
-        <label class="flex items-center gap-3 cursor-pointer">
-          <input
-            type="checkbox"
-            class="w-4 h-4 rounded border-border"
-            bind:checked={accessByRecordingAccess}
-            disabled={data.isDemo}
-          />
-          <div>
-            <span>Control by Recording Access</span>
-            <p class="text-xs text-text-secondary">Use recording access rules to control Insights access</p>
+        <!-- Control by Recording Access -->
+        {#if isEditing}
+          <div class="flex items-center justify-between py-2">
+            <div>
+              <p class="text-sm font-medium text-text-primary">Control by Recording Access</p>
+              <p class="text-xs text-text-secondary">Use recording access rules to control Insights access</p>
+            </div>
+            <Toggle bind:checked={accessByRecordingAccess} color="success" size="sm" />
           </div>
-        </label>
-        <label class="flex items-center gap-3 cursor-pointer">
-          <input
-            type="checkbox"
-            class="w-4 h-4 rounded border-border"
-            bind:checked={endUserAccess}
-            disabled={data.isDemo}
-          />
-          <div>
-            <span>End Users can access all their Insights Call Logs</span>
-            <p class="text-xs text-text-secondary">Allow users to view insights from their own calls</p>
+        {:else}
+          <div class="flex items-center gap-2">
+            {#if data.settings.accessByRecordingAccess}
+              <CheckCircle2 class="w-4 h-4 text-success" />
+            {:else}
+              <XCircle class="w-4 h-4 text-gray-500" />
+            {/if}
+            <div>
+              <span class="text-sm text-text-primary">Control by Recording Access</span>
+              <p class="text-xs text-text-secondary">Use recording access rules to control Insights access</p>
+            </div>
           </div>
-        </label>
+        {/if}
+
+        <!-- End User Access -->
+        {#if isEditing}
+          <div class="flex items-center justify-between py-2">
+            <div>
+              <p class="text-sm font-medium text-text-primary">End User Insights Access</p>
+              <p class="text-xs text-text-secondary">Allow users to view insights from their own calls</p>
+            </div>
+            <Toggle bind:checked={endUserAccess} color="success" size="sm" />
+          </div>
+        {:else}
+          <div class="flex items-center gap-2">
+            {#if data.settings.endUserAccess}
+              <CheckCircle2 class="w-4 h-4 text-success" />
+            {:else}
+              <XCircle class="w-4 h-4 text-gray-500" />
+            {/if}
+            <div>
+              <span class="text-sm text-text-primary">End User Insights Access</span>
+              <p class="text-xs text-text-secondary">Allow users to view insights from their own calls</p>
+            </div>
+          </div>
+        {/if}
       </div>
     </Card>
   </div>

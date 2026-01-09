@@ -136,7 +136,7 @@
           >
             <div class="flex items-center gap-3">
               <div class="p-2 bg-accent/10 rounded-base group-hover:bg-accent/20 transition-colors">
-                <svelte:component this={nodeType.icon} class="w-4 h-4 text-accent" />
+                <svelte:component this={nodeType.icon} class="w-4 h-4 text-text-primary" />
               </div>
               <div>
                 <p class="font-medium text-sm">{nodeType.label}</p>
@@ -196,9 +196,9 @@
               {#if node.type === 'start'}
                 <div class="w-3 h-3 rounded-full bg-success"></div>
               {:else if node.type === 'menu'}
-                <Menu class="w-4 h-4 text-accent" />
+                <Menu class="w-4 h-4 text-text-primary" />
               {:else if node.type === 'queue'}
-                <Users class="w-4 h-4 text-accent" />
+                <Users class="w-4 h-4 text-text-primary" />
               {/if}
               <span class="font-medium text-sm">{node.label}</span>
             </div>

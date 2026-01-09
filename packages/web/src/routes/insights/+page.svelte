@@ -86,10 +86,10 @@
     <Card>
       <div class="flex items-center gap-3">
         <div class="p-3 bg-primary-500/10 rounded-base">
-          <Bot class="w-6 h-6 text-primary-400" />
+          <Bot class="w-6 h-6 text-text-primary" />
         </div>
         <div>
-          <p class="text-2xl font-bold">{data.stats.totalInsights.toLocaleString()}</p>
+          <p class="text-2xl font-bold text-text-primary">{data.stats.totalInsights.toLocaleString()}</p>
           <p class="text-sm text-text-secondary">Total Insights</p>
         </div>
       </div>
@@ -100,7 +100,7 @@
           <FileText class="w-6 h-6 text-success" />
         </div>
         <div>
-          <p class="text-2xl font-bold">{data.stats.transcriptions.toLocaleString()}</p>
+          <p class="text-2xl font-bold text-text-primary">{data.stats.transcriptions.toLocaleString()}</p>
           <p class="text-sm text-text-secondary">Transcriptions</p>
         </div>
       </div>
@@ -111,18 +111,18 @@
           <Play class="w-6 h-6 text-warning" />
         </div>
         <div>
-          <p class="text-2xl font-bold">{data.stats.processing}</p>
+          <p class="text-2xl font-bold text-text-primary">{data.stats.processing}</p>
           <p class="text-sm text-text-secondary">Processing</p>
         </div>
       </div>
     </Card>
     <Card>
       <div class="flex items-center gap-3">
-        <div class="p-3 bg-purple-500/10 rounded-base">
-          <BarChart3 class="w-6 h-6 text-purple-500" />
+        <div class="p-3 bg-accent/10 rounded-base">
+          <BarChart3 class="w-6 h-6 text-text-primary" />
         </div>
         <div>
-          <p class="text-2xl font-bold">{data.stats.avgSentimentScore}%</p>
+          <p class="text-2xl font-bold text-text-primary">{data.stats.avgSentimentScore}%</p>
           <p class="text-sm text-text-secondary">Avg Sentiment</p>
         </div>
       </div>
@@ -140,7 +140,7 @@
             <div class="flex items-start justify-between gap-4">
               <div class="flex-1">
                 <div class="flex items-center gap-2 mb-2 flex-wrap">
-                  <span class="font-medium text-primary-400">
+                  <span class="font-medium text-text-primary">
                     {insight.name}
                   </span>
                   <Badge variant={getSentimentBadgeVariant(insight.sentiment)}>

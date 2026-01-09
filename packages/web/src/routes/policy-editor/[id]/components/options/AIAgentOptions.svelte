@@ -295,7 +295,7 @@
         <button
           type="button"
           onclick={addToken}
-          class="p-1 hover:bg-surface-100-900 rounded transition-colors text-accent"
+          class="p-1 hover:bg-surface-100-900 rounded transition-colors text-text-primary"
           title="Add token"
         >
           <Plus class="w-4 h-4" />

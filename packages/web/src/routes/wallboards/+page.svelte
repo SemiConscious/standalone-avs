@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Card, Button, Badge } from '$lib/components/ui';
-  import { LayoutGrid, Plus, FlaskConical, AlertCircle, Edit, Trash2, Maximize, Clock, User, Eye, EyeOff, Zap, Activity } from 'lucide-svelte';
+  import { LayoutGrid, Plus, FlaskConical, AlertCircle, Edit, Trash2, Maximize, Clock, User, Eye, EyeOff, Activity } from 'lucide-svelte';
   import type { WallboardsPageData, Wallboard } from './+page.server';
 
   interface Props {
@@ -60,12 +60,7 @@
       <FlaskConical class="w-5 h-5 flex-shrink-0" />
       <p class="text-sm">Demo Mode - showing sample data. Live wallboard data is not available.</p>
     </div>
-  {:else if data.canShowLiveData}
-    <div class="bg-success/10 border border-success/20 text-success rounded-base p-4 flex items-center gap-3">
-      <Zap class="w-5 h-5 flex-shrink-0" />
-      <p class="text-sm">Connected to Sapien API - wallboards can show real-time call data.</p>
-    </div>
-  {:else if !data.error}
+  {:else if !data.canShowLiveData && !data.error}
     <div class="bg-info/10 border border-info/20 text-info rounded-base p-4 flex items-center gap-3">
       <AlertCircle class="w-5 h-5 flex-shrink-0" />
       <p class="text-sm">For live wallboard data, configure SAPIEN_HOST environment variable.</p>

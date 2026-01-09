@@ -1,5 +1,5 @@
 import type { PageServerLoad } from './$types';
-import { hasValidCredentials } from '$lib/server/salesforce';
+import { tryCreateContextAndRepositories, isSalesforceContext } from '$lib/adapters';
 import { canUseSapienApi, getJwt, getOrganizationId, getSapienHost } from '$lib/server/gatekeeper';
 import { SAPIEN_SCOPES } from '$lib/server/sapien';
 import { env } from '$env/dynamic/private';
@@ -18,7 +18,9 @@ export interface EditorPageData {
 }
 
 export const load: PageServerLoad = async ({ locals }) => {
-  if (!hasValidCredentials(locals)) {
+  const result = tryCreateContextAndRepositories(locals);
+
+  if (!result) {
     return {
       isAuthenticated: false,
       config: {
@@ -33,6 +35,37 @@ export const load: PageServerLoad = async ({ locals }) => {
     } satisfies EditorPageData;
   }
 
+  const { ctx, isDemo } = result;
+
+  if (isDemo) {
+    return {
+      isAuthenticated: true,
+      config: {
+        avsNamespace: 'nbavs',
+        urls: '{}',
+        orgId: 'demo-org-id',
+        nbOrgId: 'demo-nb-org-id',
+        reactControllerEnabled: true,
+        routingPolicyEditorHost: 'https://routing-policy-editor.natterbox.net',
+      },
+    } satisfies EditorPageData;
+  }
+
+  if (!isSalesforceContext(ctx)) {
+    return {
+      isAuthenticated: true,
+      config: {
+        avsNamespace: 'nbavs',
+        urls: '{}',
+        orgId: null,
+        nbOrgId: null,
+        reactControllerEnabled: true,
+        routingPolicyEditorHost: 'https://routing-policy-editor.natterbox.net',
+      },
+      error: 'Routing policy editor requires Salesforce context.',
+    } satisfies EditorPageData;
+  }
+
   // Try to get Sapien JWT to populate org ID
   let nbOrgId: string | null = null;
   
@@ -40,8 +73,8 @@ export const load: PageServerLoad = async ({ locals }) => {
     try {
       // Get JWT with routing-policies scope to ensure we have org ID
       await getJwt(
-        locals.instanceUrl!,
-        locals.accessToken!,
+        ctx.instanceUrl,
+        ctx.accessToken,
         SAPIEN_SCOPES.ROUTING_POLICIES_ADMIN,
         locals.user?.id
       );
@@ -61,13 +94,12 @@ export const load: PageServerLoad = async ({ locals }) => {
   };
 
   // Get Salesforce Org ID
-  // We can get this from the instance URL or from a user info call
   let sfOrgId: string | null = null;
   try {
-    const userInfoUrl = `${locals.instanceUrl}/services/oauth2/userinfo`;
+    const userInfoUrl = `${ctx.instanceUrl}/services/oauth2/userinfo`;
     const response = await fetch(userInfoUrl, {
       headers: {
-        'Authorization': `Bearer ${locals.accessToken}`,
+        'Authorization': `Bearer ${ctx.accessToken}`,
       },
     });
     if (response.ok) {
@@ -81,7 +113,7 @@ export const load: PageServerLoad = async ({ locals }) => {
   return {
     isAuthenticated: true,
     config: {
-      avsNamespace: env.SALESFORCE_PACKAGE_NAMESPACE || 'nbavs',
+      avsNamespace: ctx.namespace,
       urls: JSON.stringify(hostURLs),
       orgId: sfOrgId,
       nbOrgId,
@@ -90,4 +122,3 @@ export const load: PageServerLoad = async ({ locals }) => {
     },
   } satisfies EditorPageData;
 };
-

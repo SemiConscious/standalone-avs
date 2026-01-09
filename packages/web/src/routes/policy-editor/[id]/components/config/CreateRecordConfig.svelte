@@ -87,7 +87,7 @@
               }
               handleChange();
             }}
-            class="w-4 h-4 rounded border-border text-accent focus:ring-accent"
+            class="w-4 h-4 rounded border-border text-text-primary focus:ring-accent"
           />
           <span class="text-sm">{option.label}</span>
         </label>
@@ -218,7 +218,7 @@
         type="checkbox"
         bind:checked={config.setOwner}
         onchange={handleChange}
-        class="w-4 h-4 rounded border-border text-accent focus:ring-accent"
+        class="w-4 h-4 rounded border-border text-text-primary focus:ring-accent"
       />
     </label>
 

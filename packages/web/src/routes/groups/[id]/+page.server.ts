@@ -1,58 +1,15 @@
 import type { PageServerLoad, Actions } from './$types';
-import { hasValidCredentials, querySalesforce, updateSalesforce, createSalesforce, deleteSalesforce, bulkUpdateSalesforce, getLicenseInfo } from '$lib/server/salesforce';
-import { env } from '$env/dynamic/private';
+import { tryCreateContextAndRepositories, createAdapterContext, getRepositories } from '$lib/adapters';
+import type { Group, GroupMember } from '$lib/domain';
+import type { GroupLicenseInfo } from '$lib/repositories';
 import { error, fail } from '@sveltejs/kit';
-
-const NAMESPACE = env.SALESFORCE_PACKAGE_NAMESPACE || 'nbavs';
 
 // Extension validation constants (from GroupController.cls)
 const EXTENSION_MIN = 2000;
 const EXTENSION_MAX = 7999;
 
-interface SalesforceGroup {
-  Id: string;
-  Name: string;
-  nbavs__Id__c: number;
-  nbavs__Description__c: string;
-  nbavs__Type__c: string;
-  nbavs__MaxQueueTime__c: number;
-  nbavs__WaitingCalls__c: number;
-  nbavs__AnsweredCalls__c: number;
-  nbavs__Extension__c: string;
-  nbavs__PBX__c: boolean;
-  nbavs__Manager__c: boolean;
-  nbavs__Record__c: boolean;
-}
-
-interface GroupMember {
-  Id: string;
-  nbavs__User__c: string;
-  nbavs__User__r: {
-    Id: string;
-    Name: string;
-    nbavs__Username__c: string;
-    nbavs__SipExtension__c: string;
-    nbavs__Enabled__c: boolean;
-    nbavs__PBX__c: boolean;
-    nbavs__Manager__c: boolean;
-    nbavs__Record__c: boolean;
-  };
-  nbavs__Priority__c: number;
-}
-
-export interface Group {
-  id: string;
-  sapienId: number;
-  name: string;
-  description: string;
-  type: string;
-  maxQueueTime: number;
-  waitingCalls: number;
-  answeredCalls: number;
-  extension: string;
-  pbx: boolean;
-  manager: boolean;
-  record: boolean;
+// Extended group type with members for this page
+interface GroupWithMembers extends Group {
   members: {
     id: string;
     membershipId: string;
@@ -67,12 +24,6 @@ export interface Group {
   }[];
 }
 
-export interface LicenseInfo {
-  pbx: { enabled: boolean };
-  manager: { enabled: boolean };
-  record: { enabled: boolean };
-}
-
 interface AvailableUser {
   id: string;
   name: string;
@@ -81,19 +32,19 @@ interface AvailableUser {
 }
 
 // Demo data
-const DEMO_GROUP: Group = {
+const DEMO_GROUP: GroupWithMembers = {
   id: 'g001',
-  sapienId: 100,
+  platformId: 100,
   name: 'Sales Team',
   description: 'Main sales team handling inbound sales inquiries',
-  type: 'RING_ALL',
-  maxQueueTime: 300,
-  waitingCalls: 3,
-  answeredCalls: 145,
+  email: '',
   extension: '3001',
+  groupPickup: '',
   pbx: true,
   manager: true,
   record: false,
+  lastModified: new Date().toISOString(),
+  memberCount: 3,
   members: [
     { id: 'u001', membershipId: 'gm001', name: 'John Smith', username: 'john.smith@natterbox.com', extension: '2001', enabled: true, priority: 1, pbx: true, manager: true, record: false },
     { id: 'u002', membershipId: 'gm002', name: 'Jane Doe', username: 'jane.doe@natterbox.com', extension: '2002', enabled: true, priority: 2, pbx: true, manager: true, record: false },
@@ -101,7 +52,7 @@ const DEMO_GROUP: Group = {
   ],
 };
 
-const DEMO_LICENSE_INFO: LicenseInfo = {
+const DEMO_LICENSE_INFO: GroupLicenseInfo = {
   pbx: { enabled: true },
   manager: { enabled: true },
   record: { enabled: true },
@@ -116,8 +67,10 @@ const DEMO_AVAILABLE_USERS: AvailableUser[] = [
 export const load: PageServerLoad = async ({ params, locals }) => {
   const { id } = params;
 
-  // Demo mode
-  if (env.PUBLIC_DEMO_MODE === 'true' || env.PUBLIC_DEMO_MODE === '1') {
+  const result = tryCreateContextAndRepositories(locals);
+
+  // Not authenticated or demo mode
+  if (!result) {
     return {
       group: { ...DEMO_GROUP, id },
       availableUsers: DEMO_AVAILABLE_USERS,
@@ -126,135 +79,62 @@ export const load: PageServerLoad = async ({ params, locals }) => {
     };
   }
 
-  if (!hasValidCredentials(locals)) {
+  const { repos, isDemo } = result;
+
+  if (isDemo) {
     return {
-      group: null,
-      availableUsers: [],
-      licenseInfo: null,
-      isDemo: false,
-      error: 'Not authenticated',
+      group: { ...DEMO_GROUP, id },
+      availableUsers: DEMO_AVAILABLE_USERS,
+      licenseInfo: DEMO_LICENSE_INFO,
+      isDemo: true,
     };
   }
 
   try {
     // Fetch license info
-    let licenseInfo: LicenseInfo | null = null;
+    let licenseInfo: GroupLicenseInfo | null = null;
     try {
-      const licInfo = await getLicenseInfo(locals.instanceUrl!, locals.accessToken!);
-      licenseInfo = {
-        pbx: { enabled: licInfo.pbx.enabled },
-        manager: { enabled: licInfo.manager.enabled },
-        record: { enabled: licInfo.record.enabled },
-      };
+      licenseInfo = await repos.license.getGroupLicenseInfo();
     } catch (e) {
       console.warn('Failed to fetch license info:', e);
     }
 
     // Fetch group
-    const groupSoql = `
-      SELECT Id, Name, ${NAMESPACE}__Id__c,
-             ${NAMESPACE}__Description__c, ${NAMESPACE}__Type__c,
-             ${NAMESPACE}__MaxQueueTime__c, ${NAMESPACE}__WaitingCalls__c,
-             ${NAMESPACE}__AnsweredCalls__c, ${NAMESPACE}__Extension__c,
-             ${NAMESPACE}__PBX__c, ${NAMESPACE}__Manager__c, ${NAMESPACE}__Record__c
-      FROM ${NAMESPACE}__Group__c
-      WHERE Id = '${id}'
-      LIMIT 1
-    `;
-
-    const groupResult = await querySalesforce<SalesforceGroup>(
-      locals.instanceUrl!,
-      locals.accessToken!,
-      groupSoql
-    );
-
-    if (groupResult.records.length === 0) {
+    const group = await repos.groups.findById(id);
+    if (!group) {
       throw error(404, 'Group not found');
     }
 
-    const sfGroup = groupResult.records[0];
-
     // Fetch group members
-    const memberSoql = `
-      SELECT Id, ${NAMESPACE}__User__c, ${NAMESPACE}__Priority__c,
-             ${NAMESPACE}__User__r.Id, ${NAMESPACE}__User__r.Name,
-             ${NAMESPACE}__User__r.${NAMESPACE}__Username__c,
-             ${NAMESPACE}__User__r.${NAMESPACE}__SipExtension__c,
-             ${NAMESPACE}__User__r.${NAMESPACE}__Enabled__c,
-             ${NAMESPACE}__User__r.${NAMESPACE}__PBX__c,
-             ${NAMESPACE}__User__r.${NAMESPACE}__Manager__c,
-             ${NAMESPACE}__User__r.${NAMESPACE}__Record__c
-      FROM ${NAMESPACE}__GroupMember__c
-      WHERE ${NAMESPACE}__Group__c = '${id}'
-      ORDER BY ${NAMESPACE}__Priority__c ASC
-    `;
-
-    const memberResult = await querySalesforce<GroupMember>(
-      locals.instanceUrl!,
-      locals.accessToken!,
-      memberSoql
-    );
-
-    const memberUserIds = memberResult.records.map(m => m.nbavs__User__c);
+    const members = await repos.groups.getMembers(id);
 
     // Fetch available users (not in this group)
     let availableUsers: AvailableUser[] = [];
     try {
-      const userSoql = `
-        SELECT Id, Name, ${NAMESPACE}__Username__c, ${NAMESPACE}__SipExtension__c
-        FROM ${NAMESPACE}__User__c
-        WHERE ${NAMESPACE}__Enabled__c = true
-        ${memberUserIds.length > 0 ? `AND Id NOT IN ('${memberUserIds.join("','")}')` : ''}
-        ORDER BY Name
-        LIMIT 200
-      `;
-
-      const userResult = await querySalesforce<{
-        Id: string;
-        Name: string;
-        nbavs__Username__c: string;
-        nbavs__SipExtension__c: string;
-      }>(locals.instanceUrl!, locals.accessToken!, userSoql);
-
-      availableUsers = userResult.records.map(u => ({
-        id: u.Id,
-        name: u.Name,
-        username: u.nbavs__Username__c || '',
-        extension: u.nbavs__SipExtension__c || '',
-      }));
+      availableUsers = await repos.groups.getAvailableUsersForGroup(id, { limit: 200 });
     } catch (e) {
       console.warn('Failed to fetch available users:', e);
     }
 
-    const group: Group = {
-      id: sfGroup.Id,
-      sapienId: sfGroup.nbavs__Id__c || 0,
-      name: sfGroup.Name || '',
-      description: sfGroup.nbavs__Description__c || '',
-      type: sfGroup.nbavs__Type__c || 'RING_ALL',
-      maxQueueTime: sfGroup.nbavs__MaxQueueTime__c || 0,
-      waitingCalls: sfGroup.nbavs__WaitingCalls__c || 0,
-      answeredCalls: sfGroup.nbavs__AnsweredCalls__c || 0,
-      extension: sfGroup.nbavs__Extension__c || '',
-      pbx: sfGroup.nbavs__PBX__c || false,
-      manager: sfGroup.nbavs__Manager__c || false,
-      record: sfGroup.nbavs__Record__c || false,
-      members: memberResult.records.map(m => ({
-        id: m.nbavs__User__c,
-        membershipId: m.Id,
-        name: m.nbavs__User__r?.Name || '',
-        username: m.nbavs__User__r?.nbavs__Username__c || '',
-        extension: m.nbavs__User__r?.nbavs__SipExtension__c || '',
-        enabled: m.nbavs__User__r?.nbavs__Enabled__c || false,
-        priority: m.nbavs__Priority__c || 0,
-        pbx: m.nbavs__User__r?.nbavs__PBX__c || false,
-        manager: m.nbavs__User__r?.nbavs__Manager__c || false,
-        record: m.nbavs__User__r?.nbavs__Record__c || false,
+    // Build extended group with members
+    const groupWithMembers: GroupWithMembers = {
+      ...group,
+      members: members.map(m => ({
+        id: m.userId,
+        membershipId: m.id,
+        name: m.userName,
+        username: '', // Not always available from group member
+        extension: '', // Not always available from group member
+        enabled: true, // Default
+        priority: m.ringOrder,
+        pbx: false,
+        manager: false,
+        record: false,
       })),
     };
 
     return {
-      group,
+      group: groupWithMembers,
       availableUsers,
       licenseInfo,
       isDemo: false,
@@ -276,15 +156,19 @@ export const actions: Actions = {
   update: async ({ params, locals, request }) => {
     const { id } = params;
 
-    if (!hasValidCredentials(locals)) {
+    const result = tryCreateContextAndRepositories(locals);
+    if (!result) {
       return fail(401, { error: 'Not authenticated' });
+    }
+
+    const { repos, isDemo } = result;
+    if (isDemo) {
+      return fail(400, { error: 'Not available in demo mode' });
     }
 
     const formData = await request.formData();
     const name = formData.get('name') as string;
     const description = formData.get('description') as string;
-    const type = formData.get('type') as string;
-    const maxQueueTime = parseInt(formData.get('maxQueueTime') as string) || 0;
     const extension = formData.get('extension') as string;
     const pbx = formData.get('pbx') === 'on';
     const manager = formData.get('manager') === 'on';
@@ -296,7 +180,7 @@ export const actions: Actions = {
       errors.push('Name is required');
     }
 
-    // Extension validation (matching GroupController.cls)
+    // Extension validation
     if (extension) {
       const extNum = parseInt(extension);
       if (isNaN(extNum) || extNum < EXTENSION_MIN || extNum > EXTENSION_MAX) {
@@ -310,33 +194,20 @@ export const actions: Actions = {
 
     try {
       // Fetch current group to check purpose rules
-      const currentGroupSoql = `
-        SELECT ${NAMESPACE}__PBX__c, ${NAMESPACE}__Manager__c, ${NAMESPACE}__Record__c,
-               ${NAMESPACE}__Extension__c
-        FROM ${NAMESPACE}__Group__c WHERE Id = '${id}'
-      `;
-      const currentGroup = await querySalesforce<{
-        nbavs__PBX__c: boolean;
-        nbavs__Manager__c: boolean;
-        nbavs__Record__c: boolean;
-        nbavs__Extension__c: string;
-      }>(locals.instanceUrl!, locals.accessToken!, currentGroupSoql);
-
-      if (currentGroup.records.length === 0) {
+      const currentGroup = await repos.groups.findById(id);
+      if (!currentGroup) {
         return fail(404, { error: 'Group not found' });
       }
 
-      const current = currentGroup.records[0];
-
       // Group purpose rules: Cannot remove a purpose once set
       const purposeErrors: string[] = [];
-      if (current.nbavs__PBX__c && !pbx) {
+      if (currentGroup.pbx && !pbx) {
         purposeErrors.push('Cannot remove PBX purpose from group');
       }
-      if (current.nbavs__Manager__c && !manager) {
+      if (currentGroup.manager && !manager) {
         purposeErrors.push('Cannot remove Manager purpose from group');
       }
-      if (current.nbavs__Record__c && !record) {
+      if (currentGroup.record && !record) {
         purposeErrors.push('Cannot remove Record purpose from group');
       }
 
@@ -344,81 +215,31 @@ export const actions: Actions = {
         return fail(400, { error: purposeErrors.join('. ') });
       }
 
-      // If adding new purpose, check member licenses
-      if ((pbx && !current.nbavs__PBX__c) || (manager && !current.nbavs__Manager__c) || (record && !current.nbavs__Record__c)) {
-        // Fetch members and their licenses
-        const memberSoql = `
-          SELECT ${NAMESPACE}__User__r.Name,
-                 ${NAMESPACE}__User__r.${NAMESPACE}__PBX__c,
-                 ${NAMESPACE}__User__r.${NAMESPACE}__Manager__c,
-                 ${NAMESPACE}__User__r.${NAMESPACE}__Record__c
-          FROM ${NAMESPACE}__GroupMember__c
-          WHERE ${NAMESPACE}__Group__c = '${id}'
-        `;
-        const members = await querySalesforce<{
-          nbavs__User__r: {
-            Name: string;
-            nbavs__PBX__c: boolean;
-            nbavs__Manager__c: boolean;
-            nbavs__Record__c: boolean;
-          };
-        }>(locals.instanceUrl!, locals.accessToken!, memberSoql);
-
-        const memberLicenseErrors: string[] = [];
-        for (const m of members.records) {
-          if (pbx && !current.nbavs__PBX__c && !m.nbavs__User__r?.nbavs__PBX__c) {
-            memberLicenseErrors.push(`User ${m.nbavs__User__r?.Name} does not have PBX license`);
-          }
-          if (manager && !current.nbavs__Manager__c && !m.nbavs__User__r?.nbavs__Manager__c) {
-            memberLicenseErrors.push(`User ${m.nbavs__User__r?.Name} does not have Manager license`);
-          }
-          if (record && !current.nbavs__Record__c && !m.nbavs__User__r?.nbavs__Record__c) {
-            memberLicenseErrors.push(`User ${m.nbavs__User__r?.Name} does not have Record license`);
-          }
-        }
-
-        if (memberLicenseErrors.length > 0) {
-          return fail(400, { error: 'Cannot add group purpose: ' + memberLicenseErrors.join('. ') });
-        }
-      }
-
       // Check extension uniqueness if changed
-      if (extension && extension !== current.nbavs__Extension__c) {
-        const duplicateCheck = await querySalesforce<{ Id: string }>(
-          locals.instanceUrl!,
-          locals.accessToken!,
-          `SELECT Id FROM ${NAMESPACE}__Group__c WHERE ${NAMESPACE}__Extension__c = '${extension}' AND Id != '${id}' LIMIT 1`
-        );
-        if (duplicateCheck.records.length > 0) {
-          return fail(400, { error: 'Extension is already in use by another group' });
+      if (extension && extension !== currentGroup.extension) {
+        const isAvailable = await repos.groups.isExtensionAvailable(extension, id);
+        if (!isAvailable) {
+          return fail(400, { error: 'Extension is already in use' });
         }
-
-        const userDuplicateCheck = await querySalesforce<{ Id: string }>(
-          locals.instanceUrl!,
-          locals.accessToken!,
-          `SELECT Id FROM ${NAMESPACE}__User__c WHERE ${NAMESPACE}__SipExtension__c = '${extension}' LIMIT 1`
-        );
-        if (userDuplicateCheck.records.length > 0) {
+        // Also check users
+        const userExtAvailable = await repos.users.isExtensionAvailable(extension);
+        if (!userExtAvailable) {
           return fail(400, { error: 'Extension is already in use by a user' });
         }
       }
 
-      await updateSalesforce(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        `${NAMESPACE}__Group__c`,
-        id,
-        {
-          Name: name,
-          [`${NAMESPACE}__Description__c`]: description,
-          [`${NAMESPACE}__Type__c`]: type,
-          [`${NAMESPACE}__MaxQueueTime__c`]: maxQueueTime,
-          [`${NAMESPACE}__Extension__c`]: extension || null,
-          [`${NAMESPACE}__PBX__c`]: pbx,
-          [`${NAMESPACE}__Manager__c`]: manager,
-          [`${NAMESPACE}__Record__c`]: record,
-        }
-      );
+      const updateResult = await repos.groups.update(id, {
+        name,
+        description,
+        extension: extension || undefined,
+        pbx,
+        manager,
+        record,
+      });
+
+      if (!updateResult.success) {
+        return fail(500, { error: updateResult.error || 'Failed to update group' });
+      }
 
       return { success: true };
     } catch (e) {
@@ -430,8 +251,14 @@ export const actions: Actions = {
   addMember: async ({ params, locals, request }) => {
     const { id } = params;
 
-    if (!hasValidCredentials(locals)) {
+    const result = tryCreateContextAndRepositories(locals);
+    if (!result) {
       return fail(401, { error: 'Not authenticated' });
+    }
+
+    const { repos, isDemo } = result;
+    if (isDemo) {
+      return fail(400, { error: 'Not available in demo mode' });
     }
 
     const formData = await request.formData();
@@ -443,16 +270,15 @@ export const actions: Actions = {
     }
 
     try {
-      await createSalesforce(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        `${NAMESPACE}__GroupMember__c`,
-        {
-          [`${NAMESPACE}__Group__c`]: id,
-          [`${NAMESPACE}__User__c`]: userId,
-          [`${NAMESPACE}__Priority__c`]: priority,
-        }
-      );
+      const addResult = await repos.groups.addMember({
+        groupId: id,
+        userId,
+        ringOrder: priority,
+      });
+
+      if (!addResult.success) {
+        return fail(500, { error: addResult.error || 'Failed to add member' });
+      }
 
       return { success: true, action: 'addMember' };
     } catch (e) {
@@ -462,8 +288,14 @@ export const actions: Actions = {
   },
 
   removeMember: async ({ locals, request }) => {
-    if (!hasValidCredentials(locals)) {
+    const result = tryCreateContextAndRepositories(locals);
+    if (!result) {
       return fail(401, { error: 'Not authenticated' });
+    }
+
+    const { repos, isDemo } = result;
+    if (isDemo) {
+      return fail(400, { error: 'Not available in demo mode' });
     }
 
     const formData = await request.formData();
@@ -474,12 +306,11 @@ export const actions: Actions = {
     }
 
     try {
-      await deleteSalesforce(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        `${NAMESPACE}__GroupMember__c`,
-        membershipId
-      );
+      const removeResult = await repos.groups.removeMemberById(membershipId);
+
+      if (!removeResult.success) {
+        return fail(500, { error: removeResult.error || 'Failed to remove member' });
+      }
 
       return { success: true, action: 'removeMember' };
     } catch (e) {
@@ -489,8 +320,14 @@ export const actions: Actions = {
   },
 
   updatePriority: async ({ locals, request }) => {
-    if (!hasValidCredentials(locals)) {
+    const result = tryCreateContextAndRepositories(locals);
+    if (!result) {
       return fail(401, { error: 'Not authenticated' });
+    }
+
+    const { repos, isDemo } = result;
+    if (isDemo) {
+      return fail(400, { error: 'Not available in demo mode' });
     }
 
     const formData = await request.formData();
@@ -502,13 +339,13 @@ export const actions: Actions = {
     }
 
     try {
-      await updateSalesforce(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        `${NAMESPACE}__GroupMember__c`,
-        membershipId,
-        { [`${NAMESPACE}__Priority__c`]: priority }
-      );
+      const updateResult = await repos.groups.bulkUpdateMemberPriorities([
+        { membershipId, priority },
+      ]);
+
+      if (!updateResult.success) {
+        return fail(500, { error: updateResult.error || 'Failed to update priority' });
+      }
 
       return { success: true, action: 'updatePriority' };
     } catch (e) {
@@ -518,8 +355,14 @@ export const actions: Actions = {
   },
 
   bulkUpdatePriorities: async ({ locals, request }) => {
-    if (!hasValidCredentials(locals)) {
+    const result = tryCreateContextAndRepositories(locals);
+    if (!result) {
       return fail(401, { error: 'Not authenticated' });
+    }
+
+    const { repos, isDemo } = result;
+    if (isDemo) {
+      return fail(400, { error: 'Not available in demo mode' });
     }
 
     const formData = await request.formData();
@@ -536,17 +379,11 @@ export const actions: Actions = {
         return { success: true, action: 'bulkUpdatePriorities' };
       }
 
-      const records = priorities.map(p => ({
-        Id: p.membershipId,
-        [`${NAMESPACE}__Priority__c`]: p.priority,
-      }));
+      const updateResult = await repos.groups.bulkUpdateMemberPriorities(priorities);
 
-      await bulkUpdateSalesforce(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        `${NAMESPACE}__GroupMember__c`,
-        records
-      );
+      if (!updateResult.success) {
+        return fail(500, { error: updateResult.error || 'Failed to update priorities' });
+      }
 
       return { success: true, action: 'bulkUpdatePriorities' };
     } catch (e) {
@@ -555,4 +392,3 @@ export const actions: Actions = {
     }
   },
 };
-

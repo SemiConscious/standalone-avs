@@ -11,7 +11,7 @@
   <!-- Page Header -->
   <div>
     <nav class="text-sm text-text-secondary mb-2">
-      <a href="/wallboards" class="hover:text-primary-400 inline-flex items-center gap-1">
+      <a href="/wallboards" class="hover:text-text-primary inline-flex items-center gap-1">
         <ArrowLeft class="w-4 h-4" />
         Back to Wallboards
       </a>
@@ -49,7 +49,7 @@
     <Card>
       <div class="text-center p-4">
         <div class="w-10 h-10 bg-primary-500/10 rounded-full flex items-center justify-center mx-auto mb-3">
-          <LayoutGrid class="w-5 h-5 text-primary-400" />
+          <LayoutGrid class="w-5 h-5 text-text-primary" />
         </div>
         <h3 class="font-medium text-text-primary mb-1">Drag & Drop Widgets</h3>
         <p class="text-sm text-text-secondary">Build dashboards with customizable widgets</p>

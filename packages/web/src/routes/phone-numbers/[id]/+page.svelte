@@ -89,7 +89,7 @@
     <div class="flex items-center gap-4 flex-1">
       <!-- Icon -->
       <div class="w-14 h-14 rounded-full bg-accent/10 flex items-center justify-center">
-        <Phone class="w-7 h-7 text-accent" />
+        <Phone class="w-7 h-7 text-text-primary" />
       </div>
       
       <div class="flex-1">
@@ -142,7 +142,7 @@
         <Card>
           {#snippet header()}
             <div class="flex items-center gap-2">
-              <Phone class="w-4 h-4 text-accent" />
+              <Phone class="w-4 h-4 text-text-primary" />
               <h3 class="font-semibold text-text-primary">Phone Number Details</h3>
             </div>
           {/snippet}
@@ -202,7 +202,7 @@
         <Card>
           {#snippet header()}
             <div class="flex items-center gap-2">
-              <Workflow class="w-4 h-4 text-accent" />
+              <Workflow class="w-4 h-4 text-text-primary" />
               <h3 class="font-semibold text-text-primary">Routing</h3>
             </div>
           {/snippet}
@@ -258,7 +258,7 @@
         <Card class="lg:col-span-2">
           {#snippet header()}
             <div class="flex items-center gap-2">
-              <Settings class="w-4 h-4 text-accent" />
+              <Settings class="w-4 h-4 text-text-primary" />
               <h3 class="font-semibold text-text-primary">Capabilities & Info</h3>
             </div>
           {/snippet}
@@ -333,7 +333,7 @@
                 <div class="text-sm">
                   <span class="text-text-secondary block">User:</span>
                   {#if data.phoneNumber.userName}
-                    <a href="/users/{data.phoneNumber.userId}" class="text-primary-400 hover:text-primary-300 hover:underline">
+                    <a href="/users/{data.phoneNumber.userId}" class="text-text-primary hover:text-primary-300 hover:underline">
                       {data.phoneNumber.userName}
                     </a>
                   {:else}
@@ -343,7 +343,7 @@
                 <div class="text-sm">
                   <span class="text-text-secondary block">Call Flow:</span>
                   {#if data.phoneNumber.callFlowName}
-                    <a href="/routing-policies/{data.phoneNumber.callFlowId}" class="text-primary-400 hover:text-primary-300 hover:underline">
+                    <a href="/routing-policies/{data.phoneNumber.callFlowId}" class="text-text-primary hover:text-primary-300 hover:underline">
                       {data.phoneNumber.callFlowName}
                     </a>
                   {:else}

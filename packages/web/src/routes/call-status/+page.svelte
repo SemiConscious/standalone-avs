@@ -211,16 +211,6 @@
       <AlertCircle class="w-5 h-5 flex-shrink-0" />
       <p class="text-sm">{data.permissionError}</p>
     </div>
-  {:else if data.usingSapien}
-    <div class="bg-success/10 border border-success/20 text-success rounded-lg p-4 flex items-center gap-3">
-      <CheckCircle class="w-5 h-5 flex-shrink-0" />
-      <p class="text-sm">
-        Connected to Sapien API - showing real-time call data.
-        {#if data.canListenIn}
-          <span class="ml-2 text-xs opacity-75">(Listen In enabled)</span>
-        {/if}
-      </p>
-    </div>
   {:else if data.sapienError}
     <div class="bg-warning/10 border border-warning/20 text-warning rounded-lg p-4 flex items-center gap-3">
       <AlertCircle class="w-5 h-5 flex-shrink-0" />
@@ -326,7 +316,7 @@
       <!-- Agents Available -->
       <div class="p-4 flex items-center gap-3">
         <div class="p-2 sm:p-3 bg-primary-500/10 rounded-lg flex-shrink-0">
-          <Users class="w-5 h-5 sm:w-6 sm:h-6 text-primary-400" />
+          <Users class="w-5 h-5 sm:w-6 sm:h-6 text-text-primary" />
         </div>
         <div class="min-w-0">
           <p class="text-xl sm:text-2xl font-bold text-text-primary">{data.stats.agentsAvailable}</p>
@@ -389,7 +379,7 @@
                     e.stopPropagation();
                     handleListenIn(row as unknown as ActiveCall);
                   }}
-                  class="p-1 text-primary-400 hover:text-primary-300 hover:bg-primary-500/10 rounded"
+                  class="p-1 text-text-primary hover:text-primary-300 hover:bg-primary-500/10 rounded"
                   title="Listen In"
                 >
                   <Headphones class="w-4 h-4" />
@@ -403,7 +393,7 @@
               <div class="flex items-center gap-2">
                 <svelte:component
                   this={StatusIcon}
-                  class="w-4 h-4 {row.status === 'connected' ? 'text-success' : row.status === 'ringing' ? 'text-warning' : 'text-primary-400'}"
+                  class="w-4 h-4 {row.status === 'connected' ? 'text-success' : row.status === 'ringing' ? 'text-warning' : 'text-text-primary'}"
                 />
                 <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
               </div>
@@ -413,7 +403,7 @@
                   <PhoneIncoming class="w-4 h-4 text-success" />
                   <span class="text-xs">In</span>
                 {:else if row.direction === 'outbound'}
-                  <PhoneOutgoing class="w-4 h-4 text-primary-400" />
+                  <PhoneOutgoing class="w-4 h-4 text-text-primary" />
                   <span class="text-xs">Out</span>
                 {:else}
                   <ArrowRightLeft class="w-4 h-4 text-text-secondary" />
@@ -539,7 +529,7 @@
     <div class="relative z-10 bg-bg-secondary rounded-lg shadow-xl max-w-md w-full mx-4 border border-border">
       <div class="flex items-center justify-between p-4 border-b border-border">
         <div class="flex items-center gap-2">
-          <Headphones class="w-5 h-5 text-primary-400" />
+          <Headphones class="w-5 h-5 text-text-primary" />
           <h2 class="text-lg font-semibold text-text-primary">Listen In</h2>
         </div>
         <button

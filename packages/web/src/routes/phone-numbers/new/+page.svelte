@@ -95,7 +95,7 @@
       <Card>
         {#snippet header()}
           <div class="flex items-center gap-2">
-            <Phone class="w-4 h-4 text-accent" />
+            <Phone class="w-4 h-4 text-text-primary" />
             <h2 class="font-semibold text-text-primary text-sm">Phone Number Details</h2>
           </div>
         {/snippet}
@@ -176,7 +176,7 @@
                 <input
                   type="checkbox"
                   bind:checked={isDDI}
-                  class="w-4 h-4 rounded border-border text-accent focus:ring-accent"
+                  class="w-4 h-4 rounded border-border text-text-primary focus:ring-accent"
                 />
                 <span class="text-sm font-medium text-text-primary">DDI Number</span>
               </label>
@@ -188,7 +188,7 @@
                 <input
                   type="checkbox"
                   bind:checked={isGeographic}
-                  class="w-4 h-4 rounded border-border text-accent focus:ring-accent"
+                  class="w-4 h-4 rounded border-border text-text-primary focus:ring-accent"
                 />
                 <span class="text-sm font-medium text-text-primary">Geographic</span>
               </label>
@@ -203,7 +203,7 @@
       <Card>
         {#snippet header()}
           <div class="flex items-center gap-2">
-            <Workflow class="w-4 h-4 text-accent" />
+            <Workflow class="w-4 h-4 text-text-primary" />
             <h2 class="font-semibold text-text-primary text-sm">Routing (Optional)</h2>
           </div>
         {/snippet}
@@ -242,7 +242,7 @@
           </div>
 
           <div class="mt-4 p-3 bg-surface-700 border border-surface-600 rounded-lg flex items-start gap-2">
-            <Info class="w-4 h-4 text-primary-400 mt-0.5 flex-shrink-0" />
+            <Info class="w-4 h-4 text-text-primary mt-0.5 flex-shrink-0" />
             <p class="text-xs text-text-secondary">
               Phone numbers are typically provisioned through your carrier. This form creates a record in Salesforce for routing configuration. Ensure the number is active with your carrier before adding it here.
             </p>

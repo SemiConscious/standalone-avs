@@ -1,54 +1,7 @@
 import type { PageServerLoad, Actions } from './$types';
-import { hasValidCredentials, querySalesforce, updateSalesforce } from '$lib/server/salesforce';
-import { env } from '$env/dynamic/private';
+import { tryCreateContextAndRepositories } from '$lib/adapters';
+import type { PhoneNumber } from '$lib/domain';
 import { error, fail } from '@sveltejs/kit';
-
-const NAMESPACE = env.SALESFORCE_PACKAGE_NAMESPACE || 'nbavs';
-
-interface SalesforcePhoneNumber {
-  Id: string;
-  Name: string;
-  nbavs__Number__c: string;
-  nbavs__Country__c: string;
-  nbavs__CountryCode__c: string;
-  nbavs__AreaCode__c: string;
-  nbavs__Area__c: string;
-  nbavs__LocalNumber__c: string;
-  nbavs__DDI_Number__c: boolean;
-  nbavs__Geographic__c: boolean;
-  nbavs__Capability_SMS__c: boolean;
-  nbavs__Capability_MMS__c: boolean;
-  nbavs__Capability_Voice__c: boolean;
-  nbavs__Local_Presence_Enabled__c: boolean;
-  LastModifiedDate: string;
-  nbavs__CallFlow__c: string;
-  nbavs__CallFlow__r?: { Id: string; Name: string };
-  nbavs__User__c: string;
-  nbavs__User__r?: { Id: string; Name: string };
-}
-
-export interface PhoneNumber {
-  id: string;
-  name: string;
-  number: string;
-  formattedNumber: string;
-  country: string;
-  countryCode: string;
-  area: string;
-  areaCode: string;
-  localNumber: string;
-  isDDI: boolean;
-  isGeographic: boolean;
-  smsEnabled: boolean;
-  mmsEnabled: boolean;
-  voiceEnabled: boolean;
-  localPresenceEnabled: boolean;
-  lastModified: string;
-  userId?: string;
-  userName?: string;
-  callFlowId?: string;
-  callFlowName?: string;
-}
 
 interface CallFlow {
   id: string;
@@ -68,20 +21,19 @@ const DEMO_PHONE_NUMBER: PhoneNumber = {
   formattedNumber: '+44 20 7123 4567',
   country: 'United Kingdom',
   countryCode: '44',
-  area: 'London',
   areaCode: '20',
-  localNumber: '71234567',
-  isDDI: true,
-  isGeographic: true,
-  smsEnabled: true,
-  mmsEnabled: false,
-  voiceEnabled: true,
-  localPresenceEnabled: false,
+  type: 'geographic',
+  status: 'active',
+  capabilities: {
+    voice: true,
+    sms: true,
+    mms: false,
+  },
   lastModified: '2026-01-05T10:30:00Z',
-  userName: 'John Smith',
-  userId: 'u001',
-  callFlowName: 'Main IVR',
-  callFlowId: 'cf001',
+  assignedUserId: 'u001',
+  assignedUserName: 'John Smith',
+  routingPolicyId: 'cf001',
+  routingPolicyName: 'Main IVR',
 };
 
 const DEMO_CALL_FLOWS: CallFlow[] = [
@@ -97,39 +49,13 @@ const DEMO_USERS: UserOption[] = [
   { id: 'u003', name: 'Bob Johnson' },
 ];
 
-function formatPhoneNumber(number: string, countryCode?: string): string {
-  if (!number) return '';
-  const cleaned = number.replace(/\D/g, '');
-  
-  // UK formatting
-  if (countryCode === '44' || number.startsWith('+44')) {
-    const ukNumber = cleaned.startsWith('44') ? cleaned.slice(2) : cleaned;
-    if (ukNumber.length === 10) {
-      return `+44 ${ukNumber.slice(0, 2)} ${ukNumber.slice(2, 6)} ${ukNumber.slice(6)}`;
-    }
-    if (ukNumber.length === 11) {
-      if (ukNumber.startsWith('7')) {
-        return `+44 ${ukNumber.slice(0, 4)} ${ukNumber.slice(4, 7)} ${ukNumber.slice(7)}`;
-      }
-    }
-  }
-  
-  // US formatting
-  if (countryCode === '1' || number.startsWith('+1')) {
-    const usNumber = cleaned.startsWith('1') ? cleaned.slice(1) : cleaned;
-    if (usNumber.length === 10) {
-      return `+1 (${usNumber.slice(0, 3)}) ${usNumber.slice(3, 6)}-${usNumber.slice(6)}`;
-    }
-  }
-  
-  return number.startsWith('+') ? number : `+${number}`;
-}
-
 export const load: PageServerLoad = async ({ params, locals }) => {
   const { id } = params;
 
-  // Demo mode
-  if (env.PUBLIC_DEMO_MODE === 'true' || env.PUBLIC_DEMO_MODE === '1') {
+  const result = tryCreateContextAndRepositories(locals);
+
+  // Not authenticated - show demo data
+  if (!result) {
     return {
       phoneNumber: { ...DEMO_PHONE_NUMBER, id },
       callFlows: DEMO_CALL_FLOWS,
@@ -138,96 +64,41 @@ export const load: PageServerLoad = async ({ params, locals }) => {
     };
   }
 
-  if (!hasValidCredentials(locals)) {
+  const { repos, isDemo } = result;
+
+  if (isDemo) {
     return {
-      phoneNumber: null,
-      callFlows: [],
-      users: [],
-      isDemo: false,
-      error: 'Not authenticated',
+      phoneNumber: { ...DEMO_PHONE_NUMBER, id },
+      callFlows: DEMO_CALL_FLOWS,
+      users: DEMO_USERS,
+      isDemo: true,
     };
   }
 
   try {
     // Fetch phone number
-    const phoneSoql = `
-      SELECT Id, Name,
-             ${NAMESPACE}__Number__c, ${NAMESPACE}__Country__c, ${NAMESPACE}__CountryCode__c,
-             ${NAMESPACE}__AreaCode__c, ${NAMESPACE}__Area__c, ${NAMESPACE}__LocalNumber__c,
-             ${NAMESPACE}__DDI_Number__c, ${NAMESPACE}__Geographic__c,
-             ${NAMESPACE}__Capability_SMS__c, ${NAMESPACE}__Capability_MMS__c, ${NAMESPACE}__Capability_Voice__c,
-             ${NAMESPACE}__Local_Presence_Enabled__c, LastModifiedDate,
-             ${NAMESPACE}__CallFlow__c, ${NAMESPACE}__CallFlow__r.Id, ${NAMESPACE}__CallFlow__r.Name,
-             ${NAMESPACE}__User__c, ${NAMESPACE}__User__r.Id, ${NAMESPACE}__User__r.Name
-      FROM ${NAMESPACE}__PhoneNumber__c
-      WHERE Id = '${id}'
-      LIMIT 1
-    `;
-
-    const phoneResult = await querySalesforce<SalesforcePhoneNumber>(
-      locals.instanceUrl!,
-      locals.accessToken!,
-      phoneSoql
-    );
-
-    if (phoneResult.records.length === 0) {
+    const phoneNumber = await repos.phoneNumbers.findById(id);
+    if (!phoneNumber) {
       throw error(404, 'Phone number not found');
-    }
-
-    const sfPhone = phoneResult.records[0];
-
-    // Fetch call flows for dropdown
-    let callFlows: CallFlow[] = [];
-    try {
-      const cfSoql = `SELECT Id, Name FROM ${NAMESPACE}__CallFlow__c ORDER BY Name LIMIT 200`;
-      const cfResult = await querySalesforce<{ Id: string; Name: string }>(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        cfSoql
-      );
-      callFlows = cfResult.records.map(cf => ({ id: cf.Id, name: cf.Name }));
-    } catch (e) {
-      console.warn('Failed to fetch call flows:', e);
     }
 
     // Fetch users for dropdown
     let users: UserOption[] = [];
     try {
-      const userSoql = `SELECT Id, Name FROM ${NAMESPACE}__User__c WHERE ${NAMESPACE}__Enabled__c = true ORDER BY Name LIMIT 500`;
-      const userResult = await querySalesforce<{ Id: string; Name: string }>(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        userSoql
-      );
-      users = userResult.records.map(u => ({ id: u.Id, name: u.Name }));
+      const userResult = await repos.users.findAll({ page: 1, pageSize: 500, filters: { enabled: true } });
+      users = userResult.items.map(u => ({ id: u.id, name: u.name }));
     } catch (e) {
       console.warn('Failed to fetch users:', e);
     }
 
-    const number = sfPhone.nbavs__Number__c || '';
-
-    const phoneNumber: PhoneNumber = {
-      id: sfPhone.Id,
-      name: sfPhone.Name || '',
-      number: number,
-      formattedNumber: formatPhoneNumber(number, sfPhone.nbavs__CountryCode__c),
-      country: sfPhone.nbavs__Country__c || '',
-      countryCode: sfPhone.nbavs__CountryCode__c || '',
-      area: sfPhone.nbavs__Area__c || '',
-      areaCode: sfPhone.nbavs__AreaCode__c || '',
-      localNumber: sfPhone.nbavs__LocalNumber__c || '',
-      isDDI: sfPhone.nbavs__DDI_Number__c || false,
-      isGeographic: sfPhone.nbavs__Geographic__c || false,
-      smsEnabled: sfPhone.nbavs__Capability_SMS__c || false,
-      mmsEnabled: sfPhone.nbavs__Capability_MMS__c || false,
-      voiceEnabled: sfPhone.nbavs__Capability_Voice__c || false,
-      localPresenceEnabled: sfPhone.nbavs__Local_Presence_Enabled__c || false,
-      lastModified: sfPhone.LastModifiedDate,
-      userId: sfPhone.nbavs__User__r?.Id,
-      userName: sfPhone.nbavs__User__r?.Name,
-      callFlowId: sfPhone.nbavs__CallFlow__r?.Id,
-      callFlowName: sfPhone.nbavs__CallFlow__r?.Name,
-    };
+    // Fetch routing policies for dropdown
+    let callFlows: CallFlow[] = [];
+    try {
+      const policyResult = await repos.routingPolicies.findAll({ page: 1, pageSize: 200 });
+      callFlows = policyResult.items.map(p => ({ id: p.id, name: p.name }));
+    } catch (e) {
+      console.warn('Failed to fetch routing policies:', e);
+    }
 
     return {
       phoneNumber,
@@ -252,8 +123,14 @@ export const actions: Actions = {
   update: async ({ params, locals, request }) => {
     const { id } = params;
 
-    if (!hasValidCredentials(locals)) {
+    const result = tryCreateContextAndRepositories(locals);
+    if (!result) {
       return fail(401, { error: 'Not authenticated' });
+    }
+
+    const { repos, isDemo } = result;
+    if (isDemo) {
+      return fail(400, { error: 'Not available in demo mode' });
     }
 
     const formData = await request.formData();
@@ -267,22 +144,15 @@ export const actions: Actions = {
     }
 
     try {
-      const updateData: Record<string, unknown> = {
-        Name: name,
-        [`${NAMESPACE}__Local_Presence_Enabled__c`]: localPresenceEnabled,
-      };
+      const updateResult = await repos.phoneNumbers.update(id, {
+        name,
+        routingPolicyId: callFlowId || undefined,
+        assignedUserId: userId || undefined,
+      });
 
-      // Handle lookup fields - set to null if empty to clear them
-      updateData[`${NAMESPACE}__CallFlow__c`] = callFlowId || null;
-      updateData[`${NAMESPACE}__User__c`] = userId || null;
-
-      await updateSalesforce(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        `${NAMESPACE}__PhoneNumber__c`,
-        id,
-        updateData
-      );
+      if (!updateResult.success) {
+        return fail(500, { error: updateResult.error || 'Failed to update phone number' });
+      }
 
       return { success: true };
     } catch (e) {

@@ -142,7 +142,7 @@
     
     <div class="flex items-center gap-4 flex-1">
       <!-- Avatar -->
-      <div class="w-14 h-14 rounded-full bg-accent/10 flex items-center justify-center text-accent text-xl font-bold">
+      <div class="w-14 h-14 rounded-full bg-accent/10 flex items-center justify-center text-text-primary text-xl font-bold">
         {data.user?.firstName?.[0] || ''}{data.user?.lastName?.[0] || ''}
       </div>
       
@@ -212,7 +212,7 @@
             <!-- Stats Grid -->
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
               <div class="text-center p-3 bg-bg-secondary rounded-lg">
-                <p class="text-2xl font-bold text-accent">{data.user.groups.length}</p>
+                <p class="text-2xl font-bold text-text-primary">{data.user.groups.length}</p>
                 <p class="text-xs text-text-secondary">Groups</p>
               </div>
               <div class="text-center p-3 bg-bg-secondary rounded-lg">
@@ -258,7 +258,7 @@
             <Card>
               {#snippet header()}
                 <div class="flex items-center gap-2">
-                  <User class="w-4 h-4 text-accent" />
+                  <User class="w-4 h-4 text-text-primary" />
                   <h3 class="font-semibold text-text-primary">Personal Information</h3>
                 </div>
               {/snippet}
@@ -333,7 +333,7 @@
             <Card>
               {#snippet header()}
                 <div class="flex items-center gap-2">
-                  <Phone class="w-4 h-4 text-accent" />
+                  <Phone class="w-4 h-4 text-text-primary" />
                   <h3 class="font-semibold text-text-primary">Phone Settings</h3>
                 </div>
               {/snippet}
@@ -378,7 +378,7 @@
             <Card class="lg:col-span-2">
               {#snippet header()}
                 <div class="flex items-center gap-2">
-                  <Link class="w-4 h-4 text-accent" />
+                  <Link class="w-4 h-4 text-text-primary" />
                   <h3 class="font-semibold text-text-primary">Salesforce User Link</h3>
                 </div>
               {/snippet}
@@ -409,7 +409,7 @@
             {#snippet header()}
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2">
-                  <Key class="w-4 h-4 text-accent" />
+                  <Key class="w-4 h-4 text-text-primary" />
                   <h3 class="font-semibold text-text-primary">License Assignments</h3>
                 </div>
                 {#if data.organizationLicenses}
@@ -480,7 +480,7 @@
             {#snippet header()}
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2">
-                  <Users class="w-4 h-4 text-accent" />
+                  <Users class="w-4 h-4 text-text-primary" />
                   <h3 class="font-semibold text-text-primary">Group Memberships</h3>
                 </div>
                 <Button variant="ghost" size="sm" href="/groups">
@@ -496,7 +496,7 @@
                     href="/groups" 
                     class="p-3 bg-bg-secondary rounded-lg border border-border hover:border-accent/30 transition-colors flex items-center gap-2"
                   >
-                    <Users class="w-4 h-4 text-accent" />
+                    <Users class="w-4 h-4 text-text-primary" />
                     <span class="text-sm font-medium truncate">{group}</span>
                   </a>
                 {/each}

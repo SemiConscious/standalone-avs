@@ -425,7 +425,7 @@
         <button
           type="button"
           onclick={() => showTestModal = !showTestModal}
-          class="text-xs text-accent hover:underline"
+          class="text-xs text-text-primary hover:underline"
         >
           {showTestModal ? 'Hide' : 'Show'} Test
         </button>

@@ -37,7 +37,7 @@
   
   <div class="flex items-center gap-3">
     <div class="w-10 h-10 rounded-lg bg-primary-500/30 flex items-center justify-center">
-      <Icon class="w-5 h-5 text-primary-400" />
+      <Icon class="w-5 h-5 text-text-primary" />
     </div>
     <div class="flex flex-col">
       <span class="font-medium text-text-primary text-sm">

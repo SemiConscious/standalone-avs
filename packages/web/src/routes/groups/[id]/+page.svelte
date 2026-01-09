@@ -154,7 +154,7 @@
         <Card>
           {#snippet header()}
             <div class="flex items-center gap-2">
-              <Settings class="w-4 h-4 text-accent" />
+              <Settings class="w-4 h-4 text-text-primary" />
               <h3 class="font-semibold text-text-primary">Settings</h3>
             </div>
           {/snippet}
@@ -247,7 +247,7 @@
                 onclick={() => showPurpose = !showPurpose}
               >
                 <div class="flex items-center gap-2">
-                  <Shield class="w-4 h-4 text-accent" />
+                  <Shield class="w-4 h-4 text-text-primary" />
                   <span class="text-sm font-medium">Group Purpose</span>
                 </div>
                 <ChevronDown class="w-4 h-4 transition-transform {showPurpose ? 'rotate-180' : ''}" />
@@ -302,7 +302,7 @@
           {#snippet header()}
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-2">
-                <Users class="w-4 h-4 text-accent" />
+                <Users class="w-4 h-4 text-text-primary" />
                 <h3 class="font-semibold text-text-primary">Members</h3>
                 <Badge variant="neutral" size="sm">{data.group.members.length}</Badge>
               </div>
@@ -369,12 +369,12 @@
               {#each data.group.members as member, index}
                 <div class="flex items-center justify-between p-2.5 bg-bg-secondary rounded-lg border border-border hover:border-accent/30 transition-colors">
                   <div class="flex items-center gap-3">
-                    <div class="w-7 h-7 rounded-full bg-accent/10 flex items-center justify-center text-xs font-bold text-accent">
+                    <div class="w-7 h-7 rounded-full bg-accent/10 flex items-center justify-center text-xs font-bold text-text-primary">
                       {index + 1}
                     </div>
                     <div>
                       <div class="flex items-center gap-2">
-                        <a href="/users/{member.id}" class="text-sm font-medium text-text-primary hover:text-primary-400">
+                        <a href="/users/{member.id}" class="text-sm font-medium text-text-primary hover:text-text-primary">
                           {member.name}
                         </a>
                         {#if !member.enabled}

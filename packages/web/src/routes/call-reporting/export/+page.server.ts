@@ -1,23 +1,12 @@
-import { querySalesforce, hasValidCredentials } from '$lib/server/salesforce';
-import { env } from '$env/dynamic/private';
+/**
+ * Call Reporting Export Page Server
+ * 
+ * Uses repository pattern for platform-agnostic data loading.
+ * Note: Complex export queries use specialized call log queries.
+ */
+
+import { tryCreateContextAndRepositories, isSalesforceContext } from '$lib/adapters';
 import type { PageServerLoad, Actions } from './$types';
-
-const NAMESPACE = 'nbavs__';
-
-interface SalesforceCallLog {
-  Id: string;
-  Name: string;
-  nbavs__DateTime__c: string;
-  nbavs__Direction__c: string;
-  nbavs__TimeTalking__c: number;
-  nbavs__TimeRinging__c: number;
-  nbavs__TimeInQueue__c: number;
-  nbavs__Result__c: string;
-  nbavs__Number__c: string;
-  nbavs__User__r?: { Name: string };
-  nbavs__Group__r?: { Name: string };
-  CreatedDate: string;
-}
 
 export interface ExportField {
   key: string;
@@ -46,16 +35,16 @@ const AVAILABLE_FIELDS: ExportField[] = [
 ];
 
 export const load: PageServerLoad = async ({ locals }) => {
-  // Demo mode check
-  const isDemo = env.PUBLIC_DEMO_MODE === 'true' || env.PUBLIC_DEMO_MODE === '1';
+  const result = tryCreateContextAndRepositories(locals);
 
-  if (!isDemo && !hasValidCredentials(locals)) {
+  if (!result) {
     return {
       fields: AVAILABLE_FIELDS,
-      isDemo: false,
-      error: 'Not authenticated',
+      isDemo: true,
     } satisfies ExportPageData;
   }
+
+  const { isDemo } = result;
 
   return {
     fields: AVAILABLE_FIELDS,
@@ -73,137 +62,88 @@ export const actions: Actions = {
     const format = formData.get('format') as string || 'csv';
     const limit = parseInt(formData.get('limit') as string) || 1000;
 
+    const result = tryCreateContextAndRepositories(locals);
+    if (!result) {
+      return { success: false, error: 'Not authenticated' };
+    }
+
+    const { ctx, isDemo } = result;
+
     // Demo mode - return sample data
-    if (env.PUBLIC_DEMO_MODE === 'true' || env.PUBLIC_DEMO_MODE === '1') {
+    if (isDemo || !isSalesforceContext(ctx)) {
       const sampleData = generateDemoExportData(selectedFields, limit);
       return { success: true, data: sampleData, format };
     }
 
-    if (!hasValidCredentials(locals)) {
-      return { success: false, error: 'Not authenticated' };
-    }
-
     try {
-      // Build field list for SOQL
-      const fieldMap: Record<string, string> = {
-        'Name': 'Name',
-        'DateTime__c': `${NAMESPACE}DateTime__c`,
-        'Direction__c': `${NAMESPACE}Direction__c`,
-        'Number__c': `${NAMESPACE}Number__c`,
-        'TimeTalking__c': `${NAMESPACE}TimeTalking__c`,
-        'TimeRinging__c': `${NAMESPACE}TimeRinging__c`,
-        'TimeInQueue__c': `${NAMESPACE}TimeInQueue__c`,
-        'Result__c': `${NAMESPACE}Result__c`,
-        'User__r.Name': `${NAMESPACE}User__r.Name`,
-        'Group__r.Name': `${NAMESPACE}Group__r.Name`,
-        'CreatedDate': 'CreatedDate',
-      };
-
-      const soqlFields = selectedFields.map(f => fieldMap[f] || f).filter(Boolean);
-      if (!soqlFields.includes('Id')) soqlFields.unshift('Id');
-
-      // Build WHERE clause
-      const whereClauses: string[] = [];
-      if (startDate) {
-        whereClauses.push(`${NAMESPACE}DateTime__c >= ${new Date(startDate).toISOString()}`);
-      }
-      if (endDate) {
-        const endDateTime = new Date(endDate);
-        endDateTime.setHours(23, 59, 59, 999);
-        whereClauses.push(`${NAMESPACE}DateTime__c <= ${endDateTime.toISOString()}`);
-      }
-      if (direction && direction !== 'all') {
-        whereClauses.push(`${NAMESPACE}Direction__c = '${direction}'`);
-      }
-
-      const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-
-      const soql = `
-        SELECT ${soqlFields.join(', ')}
-        FROM ${NAMESPACE}CallLog__c
-        ${whereClause}
-        ORDER BY ${NAMESPACE}DateTime__c DESC
-        LIMIT ${Math.min(limit, 10000)}
-      `;
-
-      const result = await querySalesforce<SalesforceCallLog>(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        soql
-      );
-
-      // Transform data for export
-      const exportData = result.records.map(record => {
-        const row: Record<string, string | number> = {};
-        selectedFields.forEach(field => {
-          if (field === 'User__r.Name') {
-            row['Agent'] = record[`${NAMESPACE}User__r`]?.Name || '';
-          } else if (field === 'Group__r.Name') {
-            row['Group'] = record[`${NAMESPACE}Group__r`]?.Name || '';
-          } else if (field === 'Name' || field === 'CreatedDate') {
-            row[AVAILABLE_FIELDS.find(f => f.key === field)?.label || field] = record[field] || '';
-          } else {
-            const nsField = `${NAMESPACE}${field}`;
-            const label = AVAILABLE_FIELDS.find(f => f.key === field)?.label || field;
-            row[label] = record[nsField as keyof SalesforceCallLog] as string | number || '';
-          }
-        });
-        return row;
+      // Use the call reporting repository for exports
+      const exportData = await result.repos.callReporting.exportCallLogs({
+        startDate,
+        endDate,
+        direction: direction !== 'all' ? direction : undefined,
+        fields: selectedFields,
+        limit: Math.min(limit, 10000),
       });
 
-      return { success: true, data: exportData, format, totalRecords: result.totalSize };
+      return { success: true, data: exportData, format };
     } catch (e) {
-      console.error('Export failed:', e);
+      console.error('Export error:', e);
       return { success: false, error: e instanceof Error ? e.message : 'Export failed' };
     }
   },
 };
 
-function generateDemoExportData(fields: string[], limit: number): Record<string, string | number>[] {
+function generateDemoExportData(fields: string[], limit: number) {
   const data: Record<string, string | number>[] = [];
+  const fieldLabels = AVAILABLE_FIELDS.reduce((acc, f) => {
+    acc[f.key] = f.label;
+    return acc;
+  }, {} as Record<string, string>);
+
   const directions = ['Inbound', 'Outbound', 'Internal'];
   const results = ['Answered', 'Missed', 'Voicemail'];
-  const agents = ['John Smith', 'Sarah Johnson', 'Mike Williams', 'Emily Davis', 'David Brown'];
+  const agents = ['John Smith', 'Jane Doe', 'Bob Wilson', 'Alice Brown', 'Charlie Davis'];
   const groups = ['Sales', 'Support', 'Billing', 'Technical'];
 
   for (let i = 0; i < Math.min(limit, 100); i++) {
     const row: Record<string, string | number> = {};
-    const date = new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000);
+    const date = new Date(Date.now() - i * 3600000);
 
     fields.forEach(field => {
+      const label = fieldLabels[field] || field;
       switch (field) {
         case 'Name':
-          row['Call ID'] = `CL-${String(100000 + i).padStart(6, '0')}`;
+          row[label] = `CL-${String(1000 + i).padStart(6, '0')}`;
           break;
         case 'DateTime__c':
-          row['Date/Time'] = date.toISOString();
+          row[label] = date.toISOString();
           break;
         case 'Direction__c':
-          row['Direction'] = directions[Math.floor(Math.random() * directions.length)];
+          row[label] = directions[i % 3];
           break;
         case 'Number__c':
-          row['Phone Number'] = `+1 555 ${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`;
+          row[label] = `+44 ${Math.floor(1000000000 + Math.random() * 9000000000)}`;
           break;
         case 'TimeTalking__c':
-          row['Talk Time (seconds)'] = Math.floor(Math.random() * 600);
+          row[label] = Math.floor(Math.random() * 600);
           break;
         case 'TimeRinging__c':
-          row['Ring Time (seconds)'] = Math.floor(Math.random() * 30);
+          row[label] = Math.floor(Math.random() * 30);
           break;
         case 'TimeInQueue__c':
-          row['Queue Time (seconds)'] = Math.floor(Math.random() * 120);
+          row[label] = Math.floor(Math.random() * 120);
           break;
         case 'Result__c':
-          row['Result'] = results[Math.floor(Math.random() * results.length)];
+          row[label] = results[i % 3];
           break;
         case 'User__r.Name':
-          row['Agent'] = agents[Math.floor(Math.random() * agents.length)];
+          row[label] = agents[i % 5];
           break;
         case 'Group__r.Name':
-          row['Group'] = groups[Math.floor(Math.random() * groups.length)];
+          row[label] = groups[i % 4];
           break;
         case 'CreatedDate':
-          row['Created Date'] = date.toISOString();
+          row[label] = date.toISOString();
           break;
       }
     });

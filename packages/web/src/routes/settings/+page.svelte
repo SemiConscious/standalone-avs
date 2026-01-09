@@ -81,7 +81,7 @@
         <input
           type="checkbox"
           bind:checked={recordingEnabled}
-          class="w-5 h-5 rounded border-border text-accent focus:ring-accent"
+          class="w-5 h-5 rounded border-border text-text-primary focus:ring-accent"
         />
       </label>
 
@@ -93,7 +93,7 @@
         <input
           type="checkbox"
           bind:checked={voicemailEnabled}
-          class="w-5 h-5 rounded border-border text-accent focus:ring-accent"
+          class="w-5 h-5 rounded border-border text-text-primary focus:ring-accent"
         />
       </label>
     </div>

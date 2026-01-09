@@ -83,8 +83,8 @@
       defaultOpen: false,
       items: [
         { label: 'Insights', href: '/insights', icon: Bot },
+        { label: 'Insights Settings', href: '/insights/settings', icon: Cog },
         { label: 'AI Advisor', href: '/ai-advisor', icon: Sparkles },
-        { label: 'AI Settings', href: '/insights/settings', icon: Cog },
         { label: 'Call Reporting', href: '/call-reporting', icon: PieChart },
         { label: 'Wallboards', href: '/wallboards', icon: LayoutGrid },
       ],

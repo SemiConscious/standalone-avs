@@ -84,7 +84,7 @@
   <!-- Header -->
   <div class="flex items-center justify-between">
     <div class="flex items-center gap-3">
-      <Activity class="w-8 h-8 text-primary-400 animate-pulse" />
+      <Activity class="w-8 h-8 text-text-primary animate-pulse" />
       <div>
         <h1 class="text-2xl font-bold text-text-primary">Live Wallboard</h1>
         <p class="text-sm text-text-secondary">
@@ -148,8 +148,8 @@
       <!-- Agents Available -->
       <Card class="bg-gradient-to-br from-primary-500/10 to-primary-500/5 border-primary-500/20">
         <div class="text-center">
-          <Users class="w-8 h-8 mx-auto mb-2 text-primary-400" />
-          <p class="text-4xl font-bold text-primary-400">{stats.agentsAvailable}</p>
+          <Users class="w-8 h-8 mx-auto mb-2 text-text-primary" />
+          <p class="text-4xl font-bold text-text-primary">{stats.agentsAvailable}</p>
           <p class="text-sm text-text-secondary">Available</p>
         </div>
       </Card>
@@ -187,7 +187,7 @@
       <!-- Calls by Direction -->
       <Card>
         <h3 class="font-semibold mb-4 flex items-center gap-2 text-text-primary">
-          <Activity class="w-5 h-5 text-primary-400" />
+          <Activity class="w-5 h-5 text-text-primary" />
           Calls by Direction
         </h3>
         <div class="space-y-3">
@@ -200,7 +200,7 @@
           </div>
           <div class="flex items-center justify-between p-3 bg-bg-secondary rounded-base">
             <div class="flex items-center gap-2">
-              <PhoneOutgoing class="w-5 h-5 text-primary-400" />
+              <PhoneOutgoing class="w-5 h-5 text-text-primary" />
               <span>Outbound</span>
             </div>
             <span class="text-2xl font-bold">{stats.callsByDirection.outbound}</span>
@@ -218,7 +218,7 @@
       <!-- Queues -->
       <Card>
         <h3 class="font-semibold mb-4 flex items-center gap-2 text-text-primary">
-          <Users class="w-5 h-5 text-primary-400" />
+          <Users class="w-5 h-5 text-text-primary" />
           Calls by Queue
         </h3>
         {#if stats.callsByQueue.length > 0}
@@ -240,7 +240,7 @@
       <!-- Agent Summary -->
       <Card>
         <h3 class="font-semibold mb-4 flex items-center gap-2 text-text-primary">
-          <Users class="w-5 h-5 text-primary-400" />
+          <Users class="w-5 h-5 text-text-primary" />
           Agent Summary
         </h3>
         <div class="space-y-3">
@@ -298,7 +298,7 @@
             <h3 class="font-semibold text-text-primary">Total Calls Today</h3>
             <p class="text-sm text-text-secondary">Since midnight</p>
           </div>
-          <p class="text-4xl font-bold text-primary-400">{stats.totalCallsToday}</p>
+          <p class="text-4xl font-bold text-text-primary">{stats.totalCallsToday}</p>
         </div>
       </Card>
       <Card>
@@ -316,7 +316,7 @@
     </div>
   {:else if loading}
     <div class="text-center py-20">
-      <RefreshCw class="w-12 h-12 mx-auto mb-4 animate-spin text-primary-400" />
+      <RefreshCw class="w-12 h-12 mx-auto mb-4 animate-spin text-text-primary" />
       <p class="text-text-secondary">Loading wallboard data...</p>
     </div>
   {/if}

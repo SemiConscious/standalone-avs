@@ -19,7 +19,7 @@
     ArrowDownLeft,
     FileText,
   } from 'lucide-svelte';
-  import type { InsightDetailPageData, InsightDetail } from './+page.server';
+  import type { InsightDetailPageData, AIInsightDetail } from './+page.server';
 
   interface Props {
     data: InsightDetailPageData;
@@ -100,7 +100,7 @@
   <div class="flex items-start justify-between gap-4">
     <div>
       <nav class="text-sm text-text-secondary mb-2">
-        <a href="/insights" class="hover:text-primary-400 inline-flex items-center gap-1">
+        <a href="/insights" class="hover:text-text-primary inline-flex items-center gap-1">
           <ArrowLeft class="w-4 h-4" />
           Back to Insights
         </a>
@@ -129,7 +129,7 @@
       <!-- Summary Card -->
       <Card>
         <h2 class="text-lg font-semibold text-text-primary mb-3 flex items-center gap-2">
-          <FileText class="w-5 h-5 text-primary-400" />
+          <FileText class="w-5 h-5 text-text-primary" />
           Call Summary
         </h2>
         <p class="text-text-secondary leading-relaxed">{data.insight.summary}</p>
@@ -140,7 +140,7 @@
             <div class="flex items-center gap-2 flex-wrap">
               <Tag class="w-4 h-4 text-text-secondary" />
               {#each data.insight.categories as category}
-                <span class="px-2 py-1 text-xs bg-primary-500/10 text-primary-400 rounded">
+                <span class="px-2 py-1 text-xs bg-primary-500/10 text-text-primary rounded">
                   {category}
                 </span>
               {/each}
@@ -191,7 +191,7 @@
             {#if data.insight.direction === 'Inbound'}
               <ArrowDownLeft class="w-5 h-5 text-success" />
             {:else}
-              <ArrowUpRight class="w-5 h-5 text-primary-400" />
+              <ArrowUpRight class="w-5 h-5 text-text-primary" />
             {/if}
             <div>
               <p class="text-sm text-text-secondary">Direction</p>

@@ -92,7 +92,7 @@
       case 'Inbound':
         return 'text-success';
       case 'Outbound':
-        return 'text-primary-400';
+        return 'text-text-primary';
       default:
         return 'text-purple-500';
     }
@@ -205,12 +205,12 @@
     </div>
   {:else if !data.canPlayRecordings && !data.error}
     <div
-      class="bg-info/10 border border-info/20 text-info rounded-lg p-4 flex items-center gap-3 flex-shrink-0"
+      class="bg-bg-secondary border border-border text-text-primary rounded-lg p-4 flex items-center gap-3 flex-shrink-0"
     >
-      <AlertCircle class="w-5 h-5 flex-shrink-0" />
+      <AlertCircle class="w-5 h-5 flex-shrink-0 text-text-secondary" />
       <div class="text-sm">
-        <p class="font-medium">Recording playback not available</p>
-        <p class="text-xs opacity-75 mt-1">SAPIEN_HOST environment variable is required for playback and download.</p>
+        <p class="font-medium text-text-primary">Recording playback not configured</p>
+        <p class="text-xs text-text-secondary mt-1">Call recordings require the Sapien API to be configured. Contact your administrator.</p>
       </div>
     </div>
   {/if}
@@ -243,7 +243,7 @@
   <!-- Now Playing Banner -->
   {#if currentlyPlayingId}
     <div
-      class="bg-primary-500/10 border border-primary-500/20 text-primary-400 rounded-lg p-4 flex items-center justify-between flex-shrink-0"
+      class="bg-primary-500/10 border border-primary-500/20 text-text-primary rounded-lg p-4 flex items-center justify-between flex-shrink-0"
     >
       <div class="flex items-center gap-3">
         <Volume2 class="w-5 h-5 flex-shrink-0 animate-pulse" />
@@ -403,7 +403,7 @@
                 title={data.canPlayRecordings ? 'Play recording' : 'Recording playback not available'}
               >
                 {#if currentlyPlayingId === row.recordingId && isPlaying}
-                  <Pause class="w-4 h-4 text-primary-400" />
+                  <Pause class="w-4 h-4 text-text-primary" />
                 {:else}
                   <Play class="w-4 h-4" />
                 {/if}

@@ -52,7 +52,7 @@
       case 'error':
         return 'text-error';
       default:
-        return 'text-primary-400';
+        return 'text-text-secondary';
     }
   }
 
@@ -106,7 +106,7 @@
     </div>
     <button
       onclick={refreshData}
-      class="flex items-center gap-2 px-4 py-2 bg-bg-secondary border border-border rounded-base hover:bg-bg-tertiary transition-colors"
+      class="flex items-center gap-2 px-4 py-2 bg-bg-secondary border border-border rounded-base hover:bg-bg-tertiary transition-colors text-text-primary"
     >
       <RefreshCw class="w-4 h-4" />
       Refresh
@@ -154,7 +154,7 @@
           <XCircle class="w-6 h-6 text-error" />
         </div>
         <div>
-          <p class="text-2xl font-bold">{data.errorCount24h}</p>
+          <p class="text-2xl font-bold text-text-primary">{data.errorCount24h}</p>
           <p class="text-sm text-text-secondary">Errors (24h)</p>
         </div>
       </div>
@@ -165,7 +165,7 @@
           <AlertTriangle class="w-6 h-6 text-warning" />
         </div>
         <div>
-          <p class="text-2xl font-bold">{data.warningCount24h}</p>
+          <p class="text-2xl font-bold text-text-primary">{data.warningCount24h}</p>
           <p class="text-sm text-text-secondary">Warnings (24h)</p>
         </div>
       </div>
@@ -183,7 +183,7 @@
             <div class="flex items-center gap-3">
               <Server class="w-5 h-5 text-text-secondary" />
               <div>
-                <span class="font-medium">{service.name}</span>
+                <span class="font-medium text-text-primary">{service.name}</span>
                 {#if service.message}
                   <p class="text-xs text-text-secondary">{service.message}</p>
                 {/if}
@@ -210,7 +210,7 @@
           <div class="flex items-start gap-3 p-3 hover:bg-bg-secondary rounded-base transition-colors">
             <EventIcon class="w-4 h-4 mt-0.5 {getEventColor(event.type)}" />
             <div class="flex-1">
-              <p class="text-sm">{event.message}</p>
+              <p class="text-sm text-text-primary">{event.message}</p>
               <div class="flex items-center gap-2 text-xs text-text-secondary mt-1">
                 <span>{event.source}</span>
                 <span>•</span>

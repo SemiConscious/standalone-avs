@@ -152,7 +152,7 @@
                 type="checkbox"
                 name="enabled"
                 bind:checked={enabled}
-                class="w-4 h-4 rounded border-border text-accent focus:ring-accent"
+                class="w-4 h-4 rounded border-border text-text-primary focus:ring-accent"
               />
               <span class="text-sm font-medium text-text-primary">User Enabled</span>
             </label>

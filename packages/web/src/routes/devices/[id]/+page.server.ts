@@ -1,46 +1,16 @@
 import type { PageServerLoad, Actions } from './$types';
-import { hasValidCredentials, querySalesforce, updateSalesforce, deleteSalesforce } from '$lib/server/salesforce';
-import { env } from '$env/dynamic/private';
+import { tryCreateContextAndRepositories } from '$lib/adapters';
+import type { Device } from '$lib/domain';
 import { error, fail, redirect } from '@sveltejs/kit';
-import type { Device } from '../+page.server';
-
-const NAMESPACE = env.SALESFORCE_PACKAGE_NAMESPACE || 'nbavs';
 
 // Extension validation constants
 const EXTENSION_MIN = 2000;
 const EXTENSION_MAX = 7999;
 
-interface SalesforceDevice {
-  Id: string;
-  Name: string;
-  nbavs__Id__c: number;
-  nbavs__Extension__c: string;
-  nbavs__Location__c: string;
-  nbavs__Description__c: string;
-  nbavs__Type__c: string;
-  nbavs__Model__c: string;
-  nbavs__MAC__c: string;
-  nbavs__Enabled__c: boolean;
-  nbavs__Registered__c: boolean;
-  nbavs__RegistrationExpiry__c: string;
-  LastModifiedDate: string;
-}
-
-interface SalesforceDeviceMapping {
-  Id: string;
-  nbavs__User__c: string;
-  nbavs__User__r?: { Id: string; Name: string };
-}
-
-interface SalesforceUser {
-  Id: string;
-  Name: string;
-}
-
 // Demo data
 const DEMO_DEVICE: Device = {
   id: '1',
-  apiId: 1001,
+  platformId: 1001,
   extension: '1001',
   location: 'London Office',
   description: 'Front Desk Phone',
@@ -55,124 +25,53 @@ const DEMO_DEVICE: Device = {
   assignedUserId: 'u001',
 };
 
-function formatMacAddress(mac: string | null): string {
-  if (!mac) return '';
-  const cleaned = mac.replace(/[^a-fA-F0-9]/g, '');
-  if (cleaned.length === 12) {
-    return cleaned.match(/.{1,2}/g)?.join(':').toUpperCase() || mac;
-  }
-  return mac;
-}
+const DEMO_USERS = [
+  { id: 'u001', name: 'John Smith' },
+  { id: 'u002', name: 'Jane Doe' },
+  { id: 'u003', name: 'Bob Johnson' },
+];
 
 export const load: PageServerLoad = async ({ params, locals }) => {
   const { id } = params;
 
-  // Demo mode
-  if (env.PUBLIC_DEMO_MODE === 'true' || env.PUBLIC_DEMO_MODE === '1') {
+  const result = tryCreateContextAndRepositories(locals);
+
+  // Not authenticated - show demo data
+  if (!result) {
     return {
       device: { ...DEMO_DEVICE, id },
-      users: [
-        { Id: 'u001', Name: 'John Smith' },
-        { Id: 'u002', Name: 'Jane Doe' },
-        { Id: 'u003', Name: 'Bob Johnson' },
-      ],
+      users: DEMO_USERS,
       isDemo: true,
     };
   }
 
-  if (!hasValidCredentials(locals)) {
+  const { repos, isDemo } = result;
+
+  if (isDemo) {
     return {
-      device: null,
-      users: [],
-      isDemo: false,
-      error: 'Not authenticated',
+      device: { ...DEMO_DEVICE, id },
+      users: DEMO_USERS,
+      isDemo: true,
     };
   }
 
   try {
     // Fetch device
-    const deviceSoql = `
-      SELECT Id, Name, ${NAMESPACE}__Id__c, ${NAMESPACE}__Extension__c, ${NAMESPACE}__Location__c,
-             ${NAMESPACE}__Description__c, ${NAMESPACE}__Type__c, ${NAMESPACE}__Model__c,
-             ${NAMESPACE}__MAC__c, ${NAMESPACE}__Enabled__c, ${NAMESPACE}__Registered__c,
-             ${NAMESPACE}__RegistrationExpiry__c, LastModifiedDate
-      FROM ${NAMESPACE}__Device__c
-      WHERE Id = '${id}'
-      LIMIT 1
-    `;
-
-    const deviceResult = await querySalesforce<SalesforceDevice>(
-      locals.instanceUrl!,
-      locals.accessToken!,
-      deviceSoql
-    );
-
-    if (deviceResult.records.length === 0) {
+    const device = await repos.devices.findById(id);
+    if (!device) {
       throw error(404, 'Device not found');
     }
 
-    const sfDevice = deviceResult.records[0];
-
-    // Fetch device mapping (assigned user)
-    let assignedUserId: string | undefined;
-    let assignedUserName: string | undefined;
-    try {
-      const mappingSoql = `
-        SELECT Id, ${NAMESPACE}__User__c, ${NAMESPACE}__User__r.Id, ${NAMESPACE}__User__r.Name
-        FROM ${NAMESPACE}__DeviceMapping__c
-        WHERE ${NAMESPACE}__Device__c = '${id}'
-        LIMIT 1
-      `;
-      const mappingResult = await querySalesforce<SalesforceDeviceMapping>(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        mappingSoql
-      );
-      if (mappingResult.records.length > 0) {
-        const mapping = mappingResult.records[0];
-        assignedUserId = mapping.nbavs__User__r?.Id;
-        assignedUserName = mapping.nbavs__User__r?.Name;
-      }
-    } catch (e) {
-      console.warn('Failed to fetch device mapping:', e);
+    // Fetch device mappings
+    const mappings = await repos.devices.getMappings(id);
+    if (mappings.length > 0) {
+      device.assignedUserId = mappings[0].userId;
+      device.assignedUserName = mappings[0].userName;
     }
 
     // Fetch available users for assignment
-    let users: SalesforceUser[] = [];
-    try {
-      const usersSoql = `
-        SELECT Id, Name
-        FROM ${NAMESPACE}__User__c
-        WHERE ${NAMESPACE}__Enabled__c = true
-        ORDER BY Name
-        LIMIT 500
-      `;
-      const usersResult = await querySalesforce<SalesforceUser>(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        usersSoql
-      );
-      users = usersResult.records;
-    } catch (e) {
-      console.warn('Failed to fetch users:', e);
-    }
-
-    const device: Device = {
-      id: sfDevice.Id,
-      apiId: sfDevice.nbavs__Id__c || 0,
-      extension: sfDevice.nbavs__Extension__c || '',
-      location: sfDevice.nbavs__Location__c || '',
-      description: sfDevice.nbavs__Description__c || '',
-      type: sfDevice.nbavs__Type__c || 'Unknown',
-      model: sfDevice.nbavs__Model__c || '',
-      macAddress: formatMacAddress(sfDevice.nbavs__MAC__c),
-      enabled: sfDevice.nbavs__Enabled__c || false,
-      registered: sfDevice.nbavs__Registered__c || false,
-      registrationExpiry: sfDevice.nbavs__RegistrationExpiry__c,
-      lastModified: sfDevice.LastModifiedDate,
-      assignedUserId,
-      assignedUserName,
-    };
+    const userResult = await repos.users.findAll({ page: 1, pageSize: 500, filters: { enabled: true } });
+    const users = userResult.items.map(u => ({ id: u.id, name: u.name }));
 
     return {
       device,
@@ -195,8 +94,14 @@ export const actions: Actions = {
   update: async ({ params, locals, request }) => {
     const { id } = params;
 
-    if (!hasValidCredentials(locals)) {
+    const result = tryCreateContextAndRepositories(locals);
+    if (!result) {
       return fail(401, { error: 'Not authenticated' });
+    }
+
+    const { repos, isDemo } = result;
+    if (isDemo) {
+      return fail(400, { error: 'Not available in demo mode' });
     }
 
     const formData = await request.formData();
@@ -220,33 +125,9 @@ export const actions: Actions = {
 
       // Check for duplicate extension
       try {
-        const duplicateCheck = await querySalesforce<{ Id: string }>(
-          locals.instanceUrl!,
-          locals.accessToken!,
-          `SELECT Id FROM ${NAMESPACE}__Device__c WHERE ${NAMESPACE}__Extension__c = '${extension}' AND Id != '${id}' LIMIT 1`
-        );
-        if (duplicateCheck.records.length > 0) {
-          errors.push('Extension is already in use by another device');
-        }
-
-        // Also check users
-        const userDuplicateCheck = await querySalesforce<{ Id: string }>(
-          locals.instanceUrl!,
-          locals.accessToken!,
-          `SELECT Id FROM ${NAMESPACE}__User__c WHERE ${NAMESPACE}__SipExtension__c = '${extension}' LIMIT 1`
-        );
-        if (userDuplicateCheck.records.length > 0) {
-          errors.push('Extension is already in use by a user');
-        }
-
-        // Also check groups
-        const groupDuplicateCheck = await querySalesforce<{ Id: string }>(
-          locals.instanceUrl!,
-          locals.accessToken!,
-          `SELECT Id FROM ${NAMESPACE}__Group__c WHERE ${NAMESPACE}__Extension__c = '${extension}' LIMIT 1`
-        );
-        if (groupDuplicateCheck.records.length > 0) {
-          errors.push('Extension is already in use by a group');
+        const isAvailable = await repos.devices.isExtensionAvailable(extension, id);
+        if (!isAvailable) {
+          errors.push('Extension is already in use');
         }
       } catch (e) {
         console.warn('Failed to check extension uniqueness:', e);
@@ -266,24 +147,18 @@ export const actions: Actions = {
     }
 
     try {
-      // Build update payload
-      const updateData: Record<string, unknown> = {
-        [`${NAMESPACE}__Extension__c`]: extension,
-        [`${NAMESPACE}__Location__c`]: location,
-        [`${NAMESPACE}__Description__c`]: description,
-        [`${NAMESPACE}__Model__c`]: model,
-        [`${NAMESPACE}__MAC__c`]: macAddress,
-        [`${NAMESPACE}__Enabled__c`]: enabled,
-      };
+      const updateResult = await repos.devices.update(id, {
+        extension,
+        location,
+        description,
+        model,
+        macAddress,
+        enabled,
+      });
 
-      // Update Salesforce
-      await updateSalesforce(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        `${NAMESPACE}__Device__c`,
-        id,
-        updateData
-      );
+      if (!updateResult.success) {
+        return fail(500, { error: updateResult.error || 'Failed to update device' });
+      }
 
       return { success: true };
     } catch (e) {
@@ -295,19 +170,24 @@ export const actions: Actions = {
   delete: async ({ params, locals }) => {
     const { id } = params;
 
-    if (!hasValidCredentials(locals)) {
+    const result = tryCreateContextAndRepositories(locals);
+    if (!result) {
       return fail(401, { error: 'Not authenticated' });
     }
 
-    try {
-      await deleteSalesforce(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        `${NAMESPACE}__Device__c`,
-        id
-      );
+    const { repos, isDemo } = result;
+    if (isDemo) {
+      return fail(400, { error: 'Not available in demo mode' });
+    }
 
-      throw redirect(303, '/devices');
+    try {
+      const deleteResult = await repos.devices.delete(id);
+
+      if (!deleteResult.success) {
+        return fail(500, { error: deleteResult.error || 'Failed to delete device' });
+      }
+
+      redirect(303, '/devices');
     } catch (e) {
       if ((e as { status?: number }).status === 303) {
         throw e; // Re-throw redirects
@@ -320,35 +200,24 @@ export const actions: Actions = {
   toggleEnabled: async ({ params, locals }) => {
     const { id } = params;
 
-    if (!hasValidCredentials(locals)) {
+    const result = tryCreateContextAndRepositories(locals);
+    if (!result) {
       return fail(401, { error: 'Not authenticated' });
     }
 
-    try {
-      // Get current enabled state
-      const deviceSoql = `SELECT ${NAMESPACE}__Enabled__c FROM ${NAMESPACE}__Device__c WHERE Id = '${id}'`;
-      const deviceResult = await querySalesforce<{ nbavs__Enabled__c: boolean }>(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        deviceSoql
-      );
+    const { repos, isDemo } = result;
+    if (isDemo) {
+      return fail(400, { error: 'Not available in demo mode' });
+    }
 
-      if (deviceResult.records.length === 0) {
-        return fail(404, { error: 'Device not found' });
+    try {
+      const toggleResult = await repos.devices.toggleEnabled(id);
+
+      if (!toggleResult.success) {
+        return fail(500, { error: toggleResult.error || 'Failed to toggle device enabled state' });
       }
 
-      const currentEnabled = deviceResult.records[0].nbavs__Enabled__c;
-
-      // Toggle
-      await updateSalesforce(
-        locals.instanceUrl!,
-        locals.accessToken!,
-        `${NAMESPACE}__Device__c`,
-        id,
-        { [`${NAMESPACE}__Enabled__c`]: !currentEnabled }
-      );
-
-      return { success: true, enabled: !currentEnabled };
+      return { success: true, enabled: toggleResult.data?.enabled };
     } catch (e) {
       console.error('Failed to toggle device enabled state:', e);
       return fail(500, { error: e instanceof Error ? e.message : 'Failed to update device' });

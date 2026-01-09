@@ -1,42 +1,13 @@
-import { querySalesforce, hasValidCredentials } from '$lib/server/salesforce';
-import { 
-  canUseSapienApi,
-  sapienApiRequest,
-  getOrganizationId,
-} from '$lib/server/gatekeeper';
-import { env } from '$env/dynamic/private';
+/**
+ * Call Status Page Server
+ * 
+ * Uses repository pattern for platform-agnostic data loading.
+ * Note: Sapien API integration for real-time call data remains as external service.
+ */
+
+import { tryCreateContextAndRepositories, isSalesforceContext } from '$lib/adapters';
+import { canUseSapienApi, sapienApiRequest, getOrganizationId } from '$lib/server/gatekeeper';
 import type { PageServerLoad } from './$types';
-
-const NAMESPACE = env.SALESFORCE_PACKAGE_NAMESPACE || 'nbavs';
-
-interface SalesforceUser {
-  Id: string;
-  Name: string;
-  nbavs__Status__c: string;
-  nbavs__CTI__c: boolean;
-  nbavs__SipExtension__c: string;
-  nbavs__Id__c: number;
-  User__c?: string;
-}
-
-interface SalesforceGroup {
-  Id: string;
-  Name: string;
-  nbavs__Id__c: number;
-  nbavs__PBX__c: boolean;
-  nbavs__Manager__c: boolean;
-}
-
-interface SalesforceGroupAdministrator {
-  nbavs__Group__c: string;
-  nbavs__LiveCallStatus__c: boolean;
-  nbavs__ListenIn__c: boolean;
-}
-
-interface SalesforceGroupMember {
-  nbavs__Group__c: string;
-  nbavs__User__c: string;
-}
 
 interface SapienCall {
   id?: string;
@@ -47,7 +18,6 @@ interface SapienCall {
   to?: string;
   startTime?: string;
   answerTime?: string;
-  user?: string;
   userId?: number;
   feature?: string;
   channels?: Array<{
@@ -149,45 +119,11 @@ const DEMO_ACTIVE_CALLS: ActiveCall[] = [
     startTime: new Date(Date.now() - 225000).toISOString(),
     answerTime: new Date(Date.now() - 200000).toISOString(),
   },
-  {
-    id: '2',
-    uuid: 'demo-uuid-2',
-    status: 'ringing',
-    direction: 'inbound',
-    fromNumber: '+44 7700 900456',
-    toNumber: '+44 20 3510 0501',
-    toUserName: 'Jane Doe',
-    agentName: 'Jane Doe',
-    agentExtension: '1002',
-    duration: 12,
-    queueName: 'Sales',
-    feature: 'Hunt Group',
-    startTime: new Date(Date.now() - 12000).toISOString(),
-  },
-  {
-    id: '3',
-    uuid: 'demo-uuid-3',
-    status: 'on_hold',
-    direction: 'inbound',
-    fromNumber: '+44 7700 900789',
-    toNumber: '+44 20 3510 0502',
-    toUserName: 'Bob Johnson',
-    agentName: 'Bob Johnson',
-    agentExtension: '1003',
-    duration: 90,
-    queueName: 'Support',
-    feature: 'Queue',
-    startTime: new Date(Date.now() - 90000).toISOString(),
-    answerTime: new Date(Date.now() - 85000).toISOString(),
-  },
 ];
 
 const DEMO_AGENTS: AgentStatus[] = [
   { id: 'a1', visibleId: 1001, name: 'John Smith', extension: '1001', status: 'on_call' },
-  { id: 'a2', visibleId: 1002, name: 'Jane Doe', extension: '1002', status: 'on_call' },
-  { id: 'a3', visibleId: 1003, name: 'Bob Johnson', extension: '1003', status: 'on_call' },
-  { id: 'a4', visibleId: 1004, name: 'Alice Brown', extension: '1004', status: 'available' },
-  { id: 'a5', visibleId: 1005, name: 'Charlie Green', extension: '1005', status: 'offline' },
+  { id: 'a2', visibleId: 1002, name: 'Jane Doe', extension: '1002', status: 'available' },
 ];
 
 const DEMO_GROUPS: GroupOption[] = [
@@ -200,7 +136,6 @@ function mapAgentStatus(status: string): AgentStatus['status'] {
   if (s.includes('available') || s.includes('ready')) return 'available';
   if (s.includes('busy') || s.includes('call')) return 'busy';
   if (s.includes('wrap')) return 'wrap_up';
-  if (s.includes('offline') || s.includes('logged out')) return 'offline';
   return 'offline';
 }
 
@@ -222,8 +157,9 @@ function mapCallDirection(direction: string): ActiveCall['direction'] {
 export const load: PageServerLoad = async ({ locals, url }) => {
   const selectedGroupId = url.searchParams.get('group');
   
-  // Demo mode
-  if (env.PUBLIC_DEMO_MODE === 'true' || env.PUBLIC_DEMO_MODE === '1') {
+  const result = tryCreateContextAndRepositories(locals);
+
+  if (!result) {
     return {
       stats: DEMO_STATS,
       activeCalls: DEMO_ACTIVE_CALLS,
@@ -238,20 +174,20 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     } satisfies CallStatusPageData;
   }
 
-  // Check credentials
-  if (!hasValidCredentials(locals)) {
+  const { repos, ctx, isDemo } = result;
+
+  if (isDemo || !isSalesforceContext(ctx)) {
     return {
-      stats: { activeCalls: 0, callsWaiting: 0, agentsAvailable: 0, agentsBusy: 0, avgWaitTime: 0, longestWait: 0 },
-      activeCalls: [],
-      agents: [],
-      groups: [],
+      stats: DEMO_STATS,
+      activeCalls: DEMO_ACTIVE_CALLS,
+      agents: DEMO_AGENTS,
+      groups: DEMO_GROUPS,
       selectedGroupId: null,
-      isDemo: false,
+      isDemo: true,
       usingSapien: false,
-      sapienConfigured: false,
-      hasCallStatusPermission: false,
-      canListenIn: false,
-      error: 'Not authenticated',
+      sapienConfigured: true,
+      hasCallStatusPermission: true,
+      canListenIn: true,
     } satisfies CallStatusPageData;
   }
 
@@ -264,106 +200,34 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   let hasCallStatusPermission = false;
   let canListenIn = false;
 
-  // Check if Sapien API is configured
   const sapienConfigured = canUseSapienApi(locals);
-
-  // Build a map of user IDs to names for call display
   const userIdToNameMap = new Map<number, { name: string; extension: string }>();
 
-  // ===== STEP 1: Find the current user's Natterbox User ID =====
-  let currentNbUserId: string | null = null;
+  // Find current user's Natterbox User using repository
+  let currentNbUser = null;
   try {
-    const currentUserSoql = `
-      SELECT Id FROM ${NAMESPACE}__User__c 
-      WHERE ${NAMESPACE}__User__c = '${locals.user?.id}'
-      LIMIT 1
-    `;
-    const currentUserResult = await querySalesforce<{ Id: string }>(
-      locals.instanceUrl!,
-      locals.accessToken!,
-      currentUserSoql
-    );
-    if (currentUserResult.records.length > 0) {
-      currentNbUserId = currentUserResult.records[0].Id;
+    const sfUserId = locals.user?.id;
+    if (sfUserId) {
+      currentNbUser = await repos.users.findBySalesforceUserId(sfUserId);
     }
   } catch (e) {
     console.warn('Failed to find current Natterbox user:', e);
   }
 
-  // ===== STEP 2: Get groups where user has LiveCallStatus permission =====
-  if (currentNbUserId) {
+  // Get groups with LiveCallStatus permission using repository
+  if (currentNbUser) {
     try {
-      // Get groups where user is a GroupAdministrator with LiveCallStatus enabled
-      const adminGroupsSoql = `
-        SELECT ${NAMESPACE}__Group__c, ${NAMESPACE}__Group__r.Name, ${NAMESPACE}__Group__r.${NAMESPACE}__Id__c,
-               ${NAMESPACE}__ListenIn__c
-        FROM ${NAMESPACE}__GroupAdministrator__c
-        WHERE ${NAMESPACE}__User__c = '${currentNbUserId}'
-          AND ${NAMESPACE}__LiveCallStatus__c = true
-          AND (${NAMESPACE}__Group__r.${NAMESPACE}__PBX__c = true OR ${NAMESPACE}__Group__r.${NAMESPACE}__Manager__c = true)
-      `;
+      const adminGroups = await repos.groups.getAdminGroupsForUser(currentNbUser.id);
       
-      const adminResult = await querySalesforce<{
-        nbavs__Group__c: string;
-        nbavs__Group__r: { Name: string; nbavs__Id__c: number };
-        nbavs__ListenIn__c: boolean;
-      }>(locals.instanceUrl!, locals.accessToken!, adminGroupsSoql);
-
-      const adminGroupIds = new Set<string>();
-      for (const rec of adminResult.records) {
-        adminGroupIds.add(rec.nbavs__Group__c);
-        groups.push({
-          id: rec.nbavs__Group__c,
-          name: rec.nbavs__Group__r?.Name || 'Unknown Group',
-          canListenIn: rec.nbavs__ListenIn__c || false,
-        });
-        if (rec.nbavs__ListenIn__c) {
-          canListenIn = true;
-        }
-      }
-
-      // Also check for "All Members" permission on groups where user is a member
-      const memberGroupsSoql = `
-        SELECT ${NAMESPACE}__Group__c, ${NAMESPACE}__Group__r.Name, ${NAMESPACE}__Group__r.${NAMESPACE}__Id__c
-        FROM ${NAMESPACE}__GroupMember__c
-        WHERE ${NAMESPACE}__User__c = '${currentNbUserId}'
-          AND (${NAMESPACE}__Group__r.${NAMESPACE}__PBX__c = true OR ${NAMESPACE}__Group__r.${NAMESPACE}__Manager__c = true)
-      `;
-      
-      const memberResult = await querySalesforce<{
-        nbavs__Group__c: string;
-        nbavs__Group__r: { Name: string; nbavs__Id__c: number };
-      }>(locals.instanceUrl!, locals.accessToken!, memberGroupsSoql);
-
-      const memberGroupIds = memberResult.records.map(r => r.nbavs__Group__c);
-      
-      if (memberGroupIds.length > 0) {
-        // Check if "All Members" has LiveCallStatus permission for these groups
-        const allMembersCheckSoql = `
-          SELECT ${NAMESPACE}__Group__c, ${NAMESPACE}__Group__r.Name, ${NAMESPACE}__Group__r.${NAMESPACE}__Id__c,
-                 ${NAMESPACE}__ListenIn__c
-          FROM ${NAMESPACE}__GroupAdministrator__c
-          WHERE ${NAMESPACE}__Name__c = 'All Members'
-            AND ${NAMESPACE}__LiveCallStatus__c = true
-            AND ${NAMESPACE}__Group__c IN ('${memberGroupIds.join("','")}')
-        `;
-        
-        const allMembersResult = await querySalesforce<{
-          nbavs__Group__c: string;
-          nbavs__Group__r: { Name: string; nbavs__Id__c: number };
-          nbavs__ListenIn__c: boolean;
-        }>(locals.instanceUrl!, locals.accessToken!, allMembersCheckSoql);
-
-        for (const rec of allMembersResult.records) {
-          if (!adminGroupIds.has(rec.nbavs__Group__c)) {
-            groups.push({
-              id: rec.nbavs__Group__c,
-              name: rec.nbavs__Group__r?.Name || 'Unknown Group',
-              canListenIn: rec.nbavs__ListenIn__c || false,
-            });
-            if (rec.nbavs__ListenIn__c) {
-              canListenIn = true;
-            }
+      for (const group of adminGroups) {
+        if (group.liveCallStatus) {
+          groups.push({
+            id: group.groupId,
+            name: group.groupName,
+            canListenIn: group.listenIn || false,
+          });
+          if (group.listenIn) {
+            canListenIn = true;
           }
         }
       }
@@ -371,95 +235,61 @@ export const load: PageServerLoad = async ({ locals, url }) => {
       hasCallStatusPermission = groups.length > 0;
 
       if (!hasCallStatusPermission) {
-        permissionError = 'You do not have permission to view live call status. Contact your administrator to enable Live Call Status access via Group Administrator settings.';
+        permissionError = 'You do not have permission to view live call status.';
       }
     } catch (e) {
       console.warn('Failed to check group permissions:', e);
-      // Fall back to showing all agents without group filtering
       hasCallStatusPermission = true;
     }
   } else {
-    permissionError = 'Your Salesforce user is not linked to a Natterbox User. Contact your administrator.';
+    permissionError = 'Your Salesforce user is not linked to a Natterbox User.';
   }
 
-  // ===== STEP 3: Fetch agents (filtered by group if selected) =====
+  // Fetch agents using repository
   try {
-    let userSoql: string;
-    
-    if (selectedGroupId && groups.some(g => g.id === selectedGroupId)) {
-      // Filter by selected group members
-      userSoql = `
-        SELECT Id, Name, ${NAMESPACE}__Status__c, ${NAMESPACE}__CTI__c, ${NAMESPACE}__SipExtension__c, ${NAMESPACE}__Id__c
-        FROM ${NAMESPACE}__User__c
-        WHERE ${NAMESPACE}__CTI__c = true 
-          AND ${NAMESPACE}__Enabled__c = true
-          AND Id IN (SELECT ${NAMESPACE}__User__c FROM ${NAMESPACE}__GroupMember__c WHERE ${NAMESPACE}__Group__c = '${selectedGroupId}')
-        ORDER BY Name
-        LIMIT 200
-      `;
-    } else {
-      // Show all CTI-enabled agents
-      userSoql = `
-        SELECT Id, Name, ${NAMESPACE}__Status__c, ${NAMESPACE}__CTI__c, ${NAMESPACE}__SipExtension__c, ${NAMESPACE}__Id__c
-        FROM ${NAMESPACE}__User__c
-        WHERE ${NAMESPACE}__CTI__c = true AND ${NAMESPACE}__Enabled__c = true
-        ORDER BY Name
-        LIMIT 200
-      `;
-    }
-
-    const userResult = await querySalesforce<SalesforceUser>(
-      locals.instanceUrl!,
-      locals.accessToken!,
-      userSoql
-    );
-
-    agents = userResult.records.map((u) => {
-      // Build the user map for call display
-      if (u.nbavs__Id__c) {
-        userIdToNameMap.set(u.nbavs__Id__c, { name: u.Name, extension: u.nbavs__SipExtension__c || '' });
-      }
-      return {
-        id: u.Id,
-        visibleId: u.nbavs__Id__c,
-        name: u.Name,
-        extension: u.nbavs__SipExtension__c || '',
-        status: mapAgentStatus(u.nbavs__Status__c),
-      };
+    const usersResult = await repos.users.findAll({ 
+      page: 1, 
+      pageSize: 200,
+      filters: { enabled: true }
     });
+
+    agents = usersResult.items
+      .filter(u => u.licenses.cti)
+      .map((u) => {
+        if (u.platformId) {
+          userIdToNameMap.set(u.platformId, { name: u.name, extension: u.sipExtension || '' });
+        }
+        return {
+          id: u.id,
+          visibleId: u.platformId || 0,
+          name: u.name,
+          extension: u.sipExtension || '',
+          status: mapAgentStatus(u.status),
+        };
+      });
   } catch (e) {
     console.warn('Failed to fetch user statuses:', e);
   }
 
-  // ===== STEP 4: Try to get real-time call data from Sapien API =====
+  // Fetch real-time calls from Sapien (external API - not part of repository pattern)
   if (sapienConfigured && hasCallStatusPermission) {
     try {
       const organizationId = getOrganizationId();
-      
-      if (!organizationId) {
-        throw new Error('Organization ID not configured');
-      }
+      if (!organizationId) throw new Error('Organization ID not configured');
 
       const calls = await sapienApiRequest<{ data: SapienCall[] } | SapienCall[]>(
-        locals.instanceUrl!,
-        locals.accessToken!,
+        ctx.instanceUrl,
+        ctx.accessToken,
         'GET',
         `/organisation/${organizationId}/call`
       );
 
-      // Handle both { data: [...] } and [...] response formats
       const callsArray = Array.isArray(calls) ? calls : (calls?.data || []);
 
       if (callsArray && Array.isArray(callsArray)) {
         usingSapien = true;
         
-        // Get user IDs involved in calls (for filtering by group)
-        const groupUserIds = selectedGroupId 
-          ? new Set(agents.map(a => a.visibleId))
-          : null;
-
         for (const call of callsArray) {
-          // Parse channels if present (like avs-sfdx does)
           let fromNumber = call.from || '';
           let toNumber = call.to || '';
           let fromUserId: number | undefined;
@@ -483,15 +313,6 @@ export const load: PageServerLoad = async ({ locals, url }) => {
             }
           }
 
-          // Filter by group if selected
-          if (groupUserIds) {
-            const fromInGroup = fromUserId && groupUserIds.has(fromUserId);
-            const toInGroup = toUserId && groupUserIds.has(toUserId);
-            if (!fromInGroup && !toInGroup) {
-              continue; // Skip calls not involving group members
-            }
-          }
-
           const activeCall: ActiveCall = {
             id: call.id || call.uuid || String(activeCalls.length),
             uuid: call.uuid || call.id || '',
@@ -511,13 +332,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
             feature,
           };
 
-          // Set agent info from either from or to user
           if (toUserId && userIdToNameMap.has(toUserId)) {
             const user = userIdToNameMap.get(toUserId)!;
-            activeCall.agentName = user.name;
-            activeCall.agentExtension = user.extension;
-          } else if (fromUserId && userIdToNameMap.has(fromUserId)) {
-            const user = userIdToNameMap.get(fromUserId)!;
             activeCall.agentName = user.name;
             activeCall.agentExtension = user.extension;
           }
@@ -528,22 +344,10 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : String(e);
       console.error('Failed to fetch from Sapien:', errorMessage);
-      
-      if (errorMessage.includes('403')) {
-        sapienError = 'Access denied to call data. You may need a Manager license or Live Call Status permission.';
-      } else if (errorMessage.includes('401')) {
-        sapienError = 'Sapien authentication failed. Please try logging out and back in.';
-      } else if (errorMessage.includes('404')) {
-        sapienError = 'Call data endpoint not found. The Sapien API may be unavailable.';
-      } else if (errorMessage.includes('Organization ID')) {
-        sapienError = 'Organization not configured. Contact your administrator.';
-      } else {
-        sapienError = `Unable to fetch call data: ${errorMessage.substring(0, 80)}`;
-      }
+      sapienError = `Unable to fetch call data: ${errorMessage.substring(0, 80)}`;
     }
   }
 
-  // Calculate stats
   const agentsAvailable = agents.filter(a => a.status === 'available').length;
   const agentsBusy = agents.filter(a => a.status === 'busy' || a.status === 'on_call').length;
 
@@ -556,7 +360,6 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     longestWait: 0,
   };
 
-  // Check if Listen In is allowed for selected group
   const selectedGroup = groups.find(g => g.id === selectedGroupId);
   const currentCanListenIn = selectedGroup?.canListenIn ?? canListenIn;
 

@@ -278,7 +278,7 @@
   <div class="flex items-center justify-between">
     <div>
       <nav class="text-sm text-text-secondary mb-1">
-        <a href="/insights" class="hover:text-primary-400">Insights</a>
+        <a href="/insights" class="hover:text-text-primary">Insights</a>
         <span class="mx-2">/</span>
         <span>Search</span>
       </nav>
@@ -298,7 +298,7 @@
       </div>
       <div class="flex flex-wrap gap-2">
         {#each data.filterViews as view}
-          <div class="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border transition-colors {data.selectedViewId === view.id ? 'bg-primary-500/20 border-primary-400 text-primary-400' : 'border-border hover:border-primary-400'}">
+          <div class="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border transition-colors {data.selectedViewId === view.id ? 'bg-primary-500/20 border-primary-400 text-text-primary' : 'border-border hover:border-primary-400'}">
             <button
               type="button"
               onclick={() => loadFilterView(view)}
@@ -313,7 +313,7 @@
               <button
                 type="button"
                 onclick={() => openSaveViewModal(view)}
-                class="p-0.5 hover:text-primary-400 text-text-secondary"
+                class="p-0.5 hover:text-text-primary text-text-secondary"
                 title="Edit view"
               >
                 <Columns class="w-3 h-3" />
@@ -387,7 +387,7 @@
               <button
                 type="button"
                 onclick={() => toggleColumn(column.key)}
-                class="px-3 py-1.5 text-sm rounded border transition-colors flex items-center gap-2 {selectedColumns.includes(column.key) ? 'bg-primary-500/20 border-primary-400 text-primary-400' : 'border-border hover:border-primary-400 text-text-secondary'}"
+                class="px-3 py-1.5 text-sm rounded border transition-colors flex items-center gap-2 {selectedColumns.includes(column.key) ? 'bg-primary-500/20 border-primary-400 text-text-primary' : 'border-border hover:border-primary-400 text-text-secondary'}"
               >
                 {#if selectedColumns.includes(column.key)}
                   <Check class="w-3 h-3" />
@@ -502,7 +502,7 @@
                       {#if result.direction === 'Inbound'}
                         <ArrowDownLeft class="w-4 h-4 text-green-400" />
                       {:else}
-                        <ArrowUpRight class="w-4 h-4 text-primary-400" />
+                        <ArrowUpRight class="w-4 h-4 text-text-primary" />
                       {/if}
                     </div>
                   {/if}

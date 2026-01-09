@@ -54,7 +54,7 @@
   function getDirectionColor(direction: string): string {
     switch (direction?.toLowerCase()) {
       case 'inbound': return 'text-success';
-      case 'outbound': return 'text-primary-400';
+      case 'outbound': return 'text-text-primary';
       case 'internal': return 'text-purple-400';
       default: return 'text-text-secondary';
     }
@@ -132,7 +132,7 @@
   <div class="flex items-start justify-between gap-4">
     <div>
       <nav class="text-sm text-text-secondary mb-2">
-        <a href="/call-reporting" class="hover:text-primary-400 inline-flex items-center gap-1">
+        <a href="/call-reporting" class="hover:text-text-primary inline-flex items-center gap-1">
           <ArrowLeft class="w-4 h-4" />
           Back to Call Reporting
         </a>
@@ -156,7 +156,7 @@
   <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
     <Card>
       <div class="text-center">
-        <Phone class="w-5 h-5 mx-auto text-primary-400 mb-1" />
+        <Phone class="w-5 h-5 mx-auto text-text-primary mb-1" />
         <p class="text-2xl font-bold text-text-primary">{data.report.summary.totalCalls.toLocaleString()}</p>
         <p class="text-xs text-text-secondary">Total Calls</p>
       </div>
@@ -202,7 +202,7 @@
   {#if data.report.byDirection && data.report.byDirection.length > 0}
     <Card>
       <h2 class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-        <PieChart class="w-5 h-5 text-primary-400" />
+        <PieChart class="w-5 h-5 text-text-primary" />
         Call Distribution by Direction
       </h2>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -233,7 +233,7 @@
   {#if data.report.reportType === 'agent' && data.report.byAgent}
     <Card>
       <h2 class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-        <Users class="w-5 h-5 text-primary-400" />
+        <Users class="w-5 h-5 text-text-primary" />
         Agent Performance
       </h2>
       <div class="overflow-x-auto">
@@ -271,7 +271,7 @@
   {#if data.report.reportType === 'queue' && data.report.byGroup}
     <Card>
       <h2 class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-        <Users class="w-5 h-5 text-primary-400" />
+        <Users class="w-5 h-5 text-text-primary" />
         Queue Performance
       </h2>
       <div class="overflow-x-auto">
@@ -311,7 +311,7 @@
       <!-- Daily Trend -->
       <Card>
         <h2 class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-          <TrendingUp class="w-5 h-5 text-primary-400" />
+          <TrendingUp class="w-5 h-5 text-text-primary" />
           Daily Call Volume
         </h2>
         <div class="h-48 flex items-end gap-1">
@@ -335,7 +335,7 @@
       {#if data.report.byHour}
         <Card>
           <h2 class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-            <BarChart3 class="w-5 h-5 text-primary-400" />
+            <BarChart3 class="w-5 h-5 text-text-primary" />
             Hourly Distribution
           </h2>
           <div class="h-48 flex items-end gap-1">
@@ -362,7 +362,7 @@
     {#if data.report.byDay}
       <Card>
         <h2 class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-          <Calendar class="w-5 h-5 text-primary-400" />
+          <Calendar class="w-5 h-5 text-text-primary" />
           Calls by Day of Week
         </h2>
         <div class="grid grid-cols-7 gap-2">
@@ -388,7 +388,7 @@
   {#if data.report.reportType === 'summary' && data.report.recentCalls}
     <Card>
       <h2 class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-        <Phone class="w-5 h-5 text-primary-400" />
+        <Phone class="w-5 h-5 text-text-primary" />
         Recent Calls
       </h2>
       <div class="overflow-x-auto">
@@ -408,7 +408,7 @@
             {#each data.report.recentCalls as call}
               {@const DirIcon = getDirectionIcon(call.direction)}
               <tr class="border-b border-border hover:bg-bg-secondary">
-                <td class="py-3 px-4 text-primary-400 font-medium">{call.name}</td>
+                <td class="py-3 px-4 text-text-primary font-medium">{call.name}</td>
                 <td class="py-3 px-4 text-text-secondary text-sm">{formatDate(call.dateTime)}</td>
                 <td class="py-3 px-4">
                   <span class="inline-flex items-center gap-1 {getDirectionColor(call.direction)}">

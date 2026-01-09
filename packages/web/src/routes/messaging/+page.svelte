@@ -80,8 +80,8 @@
     </Card>
     <Card>
       <div class="flex items-center gap-3">
-        <div class="p-3 bg-blue-500/10 rounded-lg">
-          <MessageSquare class="w-6 h-6 text-blue-500" />
+        <div class="p-3 bg-teal-500/10 rounded-lg">
+          <MessageSquare class="w-6 h-6 text-teal-500" />
         </div>
         <div>
           <p class="text-2xl font-bold text-text-primary">{data.stats.smsReceivedToday.toLocaleString()}</p>
@@ -113,8 +113,8 @@
     </Card>
     <Card>
       <div class="flex items-center gap-3">
-        <div class="p-3 bg-primary-500/10 rounded-lg">
-          <Phone class="w-6 h-6 text-primary-400" />
+        <div class="p-3 bg-accent/10 rounded-lg">
+          <Phone class="w-6 h-6 text-text-primary" />
         </div>
         <div>
           <p class="text-2xl font-bold text-text-primary">{data.stats.activeNumbers}</p>
@@ -157,7 +157,7 @@
             <div class="space-y-1">
               {#each data.phoneNumbers.slice(0, 3) as pn}
                 <div class="flex items-center justify-between text-sm">
-                  <span class="font-mono">{pn.number}</span>
+                  <span class="font-mono text-text-primary">{pn.number}</span>
                   <div class="flex items-center gap-1">
                     {#if pn.mmsEnabled}
                       <Badge variant="accent" size="sm">MMS</Badge>
@@ -224,7 +224,7 @@
           {#if column.key === 'name'}
             {row.name}
           {:else if column.key === 'number'}
-            <span class="font-mono">{row.number}</span>
+            <span class="font-mono text-text-primary">{row.number}</span>
           {:else if column.key === 'smsEnabled'}
             <div class="text-center">
               {#if row.smsEnabled}

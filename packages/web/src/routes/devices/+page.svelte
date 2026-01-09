@@ -267,7 +267,7 @@
       {#snippet cell(column, row)}
         {#if column.key === 'actions'}
           <div class="flex items-center justify-end gap-1">
-            <a href="/devices/{row.id}" class="text-primary-400 hover:text-primary-300" title="Edit Device">
+            <a href="/devices/{row.id}" class="text-text-primary hover:text-primary-300" title="Edit Device">
               <Edit class="w-3.5 h-3.5" />
             </a>
             {#if row.type !== 'Web Phone'}
@@ -297,7 +297,7 @@
                     e.stopPropagation();
                     showDeleteConfirm = String(row.id);
                   }}
-                  class="text-primary-400 hover:text-primary-300"
+                  class="text-text-primary hover:text-primary-300"
                   title="Delete Device"
                 >
                   <Trash2 class="w-3.5 h-3.5" />
@@ -306,7 +306,7 @@
             {/if}
           </div>
         {:else if column.key === 'extension'}
-          <a href="/devices/{row.id}" class="text-primary-400 hover:text-primary-300 hover:underline font-mono">
+          <a href="/devices/{row.id}" class="text-text-primary hover:text-primary-300 hover:underline font-mono">
             {row.extension || '—'}
           </a>
         {:else if column.key === 'location'}
@@ -324,7 +324,7 @@
           {#if row.assignedUserName}
             <a
               href="/users/{row.assignedUserId}"
-              class="text-primary-400 hover:text-primary-300 hover:underline flex items-center gap-1"
+              class="text-text-primary hover:text-primary-300 hover:underline flex items-center gap-1"
             >
               <User class="w-3 h-3" />
               {row.assignedUserName}

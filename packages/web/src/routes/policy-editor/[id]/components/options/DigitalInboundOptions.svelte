@@ -169,7 +169,7 @@
       <button
         type="button"
         onclick={selectAll}
-        class="text-xs text-accent hover:underline"
+        class="text-xs text-text-primary hover:underline"
       >
         Select all
       </button>
@@ -177,7 +177,7 @@
       <button
         type="button"
         onclick={deselectAll}
-        class="text-xs text-accent hover:underline"
+        class="text-xs text-text-primary hover:underline"
       >
         Deselect all
       </button>
@@ -204,7 +204,7 @@
           >
             <div class="pt-0.5">
               {#if selectedChannels.includes(channel.id)}
-                <CheckSquare class="w-4 h-4 text-accent" />
+                <CheckSquare class="w-4 h-4 text-text-primary" />
               {:else}
                 <Square class="w-4 h-4 text-text-secondary" />
               {/if}

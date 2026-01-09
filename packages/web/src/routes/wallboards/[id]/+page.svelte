@@ -15,7 +15,7 @@
   <div class="flex items-start justify-between gap-4">
     <div>
       <nav class="text-sm text-text-secondary mb-2">
-        <a href="/wallboards" class="hover:text-primary-400 inline-flex items-center gap-1">
+        <a href="/wallboards" class="hover:text-text-primary inline-flex items-center gap-1">
           <ArrowLeft class="w-4 h-4" />
           Back to Wallboards
         </a>

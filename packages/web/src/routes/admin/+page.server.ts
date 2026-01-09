@@ -1,6 +1,11 @@
-import { querySalesforce, hasValidCredentials } from '$lib/server/salesforce';
+/**
+ * Admin Page Server
+ * 
+ * Uses repository pattern for platform-agnostic data loading.
+ */
+
+import { tryCreateContextAndRepositories, isSalesforceContext } from '$lib/adapters';
 import { getLicenseFromSapien, isCallReportingRunning, fetchApiSettings, clearAllCaches, getSalesforceOrgId } from '$lib/server/gatekeeper';
-import { env } from '$env/dynamic/private';
 import type { PageServerLoad, Actions } from './$types';
 import { fail } from '@sveltejs/kit';
 
@@ -81,16 +86,6 @@ const DEMO_DATA: AdminData = {
     { id: 'cro', name: 'Call Reporting Scheduled Job', isRunning: true, canStart: true, canStop: true },
     { id: 'hcro', name: 'HCRO Processing Scheduled Job', isRunning: true, canStart: true, canStop: true },
     { id: 'availability', name: 'Availability Logs Scheduled Job', isRunning: true, canStart: true, canStop: true },
-    { id: 'cq', name: 'Call Queue Logs Scheduled Job', isRunning: true, canStart: true, canStop: true },
-    { id: 'userServicePresGroupSync', name: 'Omni-Channel Status and Group Login Synchroniser Scheduled Job', isRunning: false, canStart: true, canStop: true },
-    { id: 'crFixer', name: 'Wrap-Up Fixer Scheduled Job', isRunning: true, canStart: true, canStop: true },
-    { id: 'ddlProcessor', name: 'Dynamic Dial List Processor Scheduled Job', isRunning: true, canStart: true, canStop: true },
-    { id: 'insights', name: 'AI Advisor Scheduled Job', isRunning: true, canStart: true, canStop: true },
-    { id: 'ddlReport', name: 'Dynamic Dial List Report Generator Scheduled Job', isRunning: false, canStart: true, canStop: true },
-    { id: 'croTransfers', name: 'Transferred Calls for Reporting Scheduled Job', isRunning: false, canStart: true, canStop: true },
-    { id: 'wrapupEvents', name: 'Digital Channel Wrap-Ups', isRunning: false, canStart: true, canStop: true },
-    { id: 'interactionReporting', name: 'Interaction Reporting Scheduled Job', isRunning: false, canStart: true, canStop: true },
-    { id: 'natterboxFixer', name: 'Natterbox Fixer Scheduled Job', isRunning: false, canStart: true, canStop: true },
   ],
   jobsRunning: 7,
   organizationId: '00D0000000bKE9MA2',
@@ -99,73 +94,82 @@ const DEMO_DATA: AdminData = {
 };
 
 export const load: PageServerLoad = async ({ locals }) => {
-  // Demo mode
-  if (env.DEMO_MODE === 'true' || env.DEMO_MODE === '1') {
+  const result = tryCreateContextAndRepositories(locals);
+
+  if (!result) {
     return { data: DEMO_DATA };
   }
 
-  // Check credentials
-  if (!hasValidCredentials(locals)) {
-    return { data: { ...DEMO_DATA, isDemo: false, error: 'Not authenticated' } };
+  const { repos, ctx, isDemo } = result;
+
+  if (isDemo) {
+    return { data: DEMO_DATA };
+  }
+
+  if (!isSalesforceContext(ctx)) {
+    return { data: DEMO_DATA };
   }
 
   try {
-    // Fetch inventory counts in parallel
+    // Fetch inventory counts using repositories
     const [
       usersResult,
       phoneNumbersResult,
       devicesResult,
       groupsResult,
       routingPoliciesResult,
-      eventLogsResult,
-      errorLogsResult,
-      recordingAccessResult,
     ] = await Promise.all([
-      querySalesforce<{ expr0: number }>(locals.instanceUrl!, locals.accessToken!, 'SELECT COUNT() FROM nbavs__User__c'),
-      querySalesforce<{ expr0: number }>(locals.instanceUrl!, locals.accessToken!, 'SELECT COUNT() FROM nbavs__PhoneNumber__c'),
-      querySalesforce<{ expr0: number }>(locals.instanceUrl!, locals.accessToken!, 'SELECT COUNT() FROM nbavs__Device__c'),
-      querySalesforce<{ expr0: number }>(locals.instanceUrl!, locals.accessToken!, 'SELECT COUNT() FROM nbavs__Group__c'),
-      querySalesforce<{ expr0: number }>(locals.instanceUrl!, locals.accessToken!, 'SELECT COUNT() FROM nbavs__CallFlow__c'),
-      querySalesforce<{ expr0: number }>(locals.instanceUrl!, locals.accessToken!, 'SELECT COUNT() FROM nbavs__EventLog__c WHERE CreatedDate = TODAY'),
-      querySalesforce<{ expr0: number }>(locals.instanceUrl!, locals.accessToken!, 'SELECT COUNT() FROM nbavs__ErrorLog__c WHERE CreatedDate = TODAY'),
-      querySalesforce<{ expr0: number }>(locals.instanceUrl!, locals.accessToken!, 'SELECT COUNT() FROM nbavs__RecordingAccess__c').catch(() => ({ totalSize: 0 })),
+      repos.users.findAll({ page: 1, pageSize: 1 }),
+      repos.phoneNumbers.findAll({ page: 1, pageSize: 1 }),
+      repos.devices.findAll({ page: 1, pageSize: 1 }),
+      repos.groups.findAll({ page: 1, pageSize: 1 }),
+      repos.routingPolicies.findAll({ page: 1, pageSize: 1 }),
     ]);
 
+    // Fetch monitoring stats using repository
+    let eventLogsToday = 0;
+    let errorLogsToday = 0;
+    let recordingAccessCount = 0;
+
+    try {
+      const adminCounts = await repos.monitoring.getAdminCounts();
+      eventLogsToday = adminCounts.eventLogsToday;
+      errorLogsToday = adminCounts.errorLogsToday;
+      recordingAccessCount = adminCounts.recordingAccessCount;
+    } catch (e) {
+      console.warn('Failed to fetch monitoring stats:', e);
+    }
+
     // Fetch license/subscription settings from Sapien API
-    // (License_v1__c is a protected custom setting that can't be queried via SOQL API)
     let subscriptions: Subscription[] = [];
     let subscriptionsUpdated = '';
     
     try {
-      // First ensure API settings are loaded (this is needed for isCallReportingRunning)
-      await fetchApiSettings(locals.instanceUrl!, locals.accessToken!);
-      
-      const license = await getLicenseFromSapien(locals.instanceUrl!, locals.accessToken!);
+      await fetchApiSettings(ctx.instanceUrl, ctx.accessToken);
+      const license = await getLicenseFromSapien(ctx.instanceUrl, ctx.accessToken);
       
       if (license) {
         subscriptionsUpdated = new Date().toLocaleString();
-        
         subscriptions = [
-          { name: 'Voice', enabled: license.Voice__c || false, count: license.Voice_Count__c || 0, icon: 'phone', color: 'blue' },
-          { name: 'Contact Centre', enabled: license.ContactCentre__c || false, count: license.ContactCentre_Count__c || 0, icon: 'headset', color: 'green' },
+          { name: 'Voice', enabled: license.PBX__c || false, count: license.PBX_Count__c || 0, icon: 'phone', color: 'blue' },
+          { name: 'Contact Centre', enabled: license.Manager__c || false, count: license.Manager_Count__c || 0, icon: 'headset', color: 'green' },
           { name: 'Record', enabled: license.Record__c || false, count: license.Record_Count__c || 0, icon: 'mic', color: 'red' },
           { name: 'CTI', enabled: license.CTI__c || false, count: license.CTI_Count__c || 0, icon: 'monitor', color: 'purple' },
           { name: 'PCI', enabled: license.PCI__c || false, count: license.PCI_Count__c || 0, icon: 'shield', color: 'orange' },
           { name: 'Legacy Insight', enabled: license.Insights__c || false, count: license.Insights_Count__c || 0, icon: 'chart', color: 'cyan' },
           { name: 'Freedom', enabled: license.Freedom__c || false, count: license.Freedom_Count__c || 0, icon: 'globe', color: 'indigo' },
-          { name: 'Service Cloud Voice', enabled: license.ServiceCloudVoice__c || false, count: license.ServiceCloudVoice_Count__c || 0, icon: 'cloud', color: 'sky' },
+          { name: 'Service Cloud Voice', enabled: license.SCV__c || false, count: license.SCV_Count__c || 0, icon: 'cloud', color: 'sky' },
           { name: 'SMS', enabled: license.SMS__c || false, count: license.SMS_Count__c || 0, icon: 'message', color: 'emerald' },
           { name: 'WhatsApp', enabled: license.WhatsApp__c || false, count: license.WhatsApp_Count__c || 0, icon: 'whatsapp', color: 'green' },
-          { name: 'AI Advisor', enabled: license.AIAdvisor__c || false, count: license.AIAdvisor_Count__c || 0, icon: 'sparkles', color: 'violet' },
-          { name: 'AI Agents', enabled: (license.AIAgents__c || 0) > 0, count: license.AIAgents__c || 0, icon: 'bot', color: 'fuchsia' },
-          { name: 'AI Assistants', enabled: (license.AIAssistants__c || 0) > 0, count: license.AIAssistants__c || 0, icon: 'brain', color: 'rose' },
-          { name: 'AI Agents Call Allowance', enabled: (license.AIAgentsCallAllowance__c || 0) > 0, count: license.AIAgentsCallAllowance__c || 0, icon: 'phone-call', color: 'amber' },
-          { name: 'AI Assistants Call Allowance', enabled: (license.AIAssistantsCallAllowance__c || 0) > 0, count: license.AIAssistantsCallAllowance__c || 0, icon: 'phone-incoming', color: 'lime' },
-          { name: 'AI Agents Digital Message Allowance', enabled: (license.AIAgentsDigitalMessageAllowance__c || 0) > 0, count: license.AIAgentsDigitalMessageAllowance__c || 0, icon: 'messages', color: 'teal' },
-          { name: 'AI Assistants Digital Message Allowance', enabled: (license.AIAssistantsDigitalMessageAllowance__c || 0) > 0, count: license.AIAssistantsDigitalMessageAllowance__c || 0, icon: 'message-circle', color: 'pink' },
+          { name: 'AI Advisor', enabled: license.AICallCoaching__c || false, count: license.AICallCoaching_Count__c || 0, icon: 'sparkles', color: 'violet' },
+          { name: 'AI Agents', enabled: Boolean(license.AIAgents__c), count: license.AIAgents__c || 0, icon: 'bot', color: 'fuchsia' },
+          { name: 'AI Assistants', enabled: Boolean(license.AIAssistants__c), count: license.AIAssistants__c || 0, icon: 'brain', color: 'rose' },
+          { name: 'AI Agents Call Allowance', enabled: Boolean(license.AIAgentsCallAllowance__c), count: license.AIAgentsCallAllowance__c || 0, icon: 'phone-call', color: 'amber' },
+          { name: 'AI Assistants Call Allowance', enabled: Boolean(license.AIAssistantsCallAllowance__c), count: license.AIAssistantsCallAllowance__c || 0, icon: 'phone-incoming', color: 'lime' },
+          { name: 'AI Agents Digital Message Allowance', enabled: Boolean(license.AIAgentsDigitalMessageAllowance__c), count: license.AIAgentsDigitalMessageAllowance__c || 0, icon: 'messages', color: 'teal' },
+          { name: 'AI Assistants Digital Message Allowance', enabled: Boolean(license.AIAssistantsDigitalMessageAllowance__c), count: license.AIAssistantsDigitalMessageAllowance__c || 0, icon: 'message-circle', color: 'pink' },
         ];
       } else {
-        console.log('[Admin] License not available from Sapien, using demo data');
         subscriptions = DEMO_DATA.subscriptions;
       }
     } catch (e) {
@@ -173,91 +177,53 @@ export const load: PageServerLoad = async ({ locals }) => {
       subscriptions = DEMO_DATA.subscriptions;
     }
 
-    // Fetch scheduled job status from CronTrigger
-    const jobNames = [
-      'Call Reporting',
-      'HCRO Processing', 
-      'Availability Logs',
-      'Call Queue Logs',
-      'Omni-Channel Status and Group Login Synchroniser',
-      'Wrap-Up Fixer',
-      'Dynamic Dial List Processor',
-      'AI Advisor',
-      'Dynamic Dial List Report Generator',
-      'Transferred Calls for Reporting',
-      'Interaction Reporting',
-      'Natterbox Fixer',
-    ];
-
+    // Fetch scheduled job status using repository
     let scheduledJobs: ScheduledJob[] = DEMO_DATA.scheduledJobs;
     let jobsRunning = 0;
 
     try {
-      const cronResult = await querySalesforce<{
-        Id: string;
-        CronJobDetail: { Name: string };
-      }>(locals.instanceUrl!, locals.accessToken!, `
-        SELECT Id, CronJobDetail.Name 
-        FROM CronTrigger 
-        WHERE CronJobDetail.Name IN ('${jobNames.join("','")}')
-      `);
-
-      const runningJobNames = new Set(cronResult.records.map(r => r.CronJobDetail?.Name));
-      
-      // CRO (Call Reporting) uses a different mechanism - it checks API_v1__c.ReportingPolicyId__c
-      // instead of CronTrigger. If ReportingPolicyId__c is set, CRO is running.
+      const repoJobs = await repos.monitoring.getScheduledJobs();
       const croRunning = isCallReportingRunning();
       
-      scheduledJobs = [
-        { id: 'cro', name: 'Call Reporting Scheduled Job', isRunning: croRunning, canStart: true, canStop: true },
-        { id: 'hcro', name: 'HCRO Processing Scheduled Job', isRunning: runningJobNames.has('HCRO Processing'), canStart: true, canStop: true },
-        { id: 'availability', name: 'Availability Logs Scheduled Job', isRunning: runningJobNames.has('Availability Logs'), canStart: true, canStop: true },
-        { id: 'cq', name: 'Call Queue Logs Scheduled Job', isRunning: runningJobNames.has('Call Queue Logs'), canStart: true, canStop: true },
-        { id: 'userServicePresGroupSync', name: 'Omni-Channel Status and Group Login Synchroniser Scheduled Job', isRunning: runningJobNames.has('User Service Presence Group Sync'), canStart: true, canStop: true },
-        { id: 'crFixer', name: 'Wrap-Up Fixer Scheduled Job', isRunning: runningJobNames.has('Wrap-Up Fixer'), canStart: true, canStop: true },
-        { id: 'ddlProcessor', name: 'Dynamic Dial List Processor Scheduled Job', isRunning: runningJobNames.has('Dynamic Dial List Processor'), canStart: true, canStop: true },
-        { id: 'insights', name: 'AI Advisor Scheduled Job', isRunning: runningJobNames.has('AI Advisor'), canStart: true, canStop: true },
-        { id: 'ddlReport', name: 'Dynamic Dial List Report Generator Scheduled Job', isRunning: runningJobNames.has('Dynamic Dial List Report Generator'), canStart: true, canStop: true },
-        { id: 'croTransfers', name: 'Transferred Calls for Reporting Scheduled Job', isRunning: runningJobNames.has('Transferred Calls for Reporting'), canStart: true, canStop: true },
-        { id: 'wrapupEvents', name: 'Digital Channel Wrap-Ups', isRunning: false, canStart: true, canStop: true }, // This checks Session_v1__c.WrapupSubscriptionId__c
-        { id: 'interactionReporting', name: 'Interaction Reporting Scheduled Job', isRunning: runningJobNames.has('Interaction Reporting'), canStart: true, canStop: true },
-        { id: 'natterboxFixer', name: 'Natterbox Fixer Scheduled Job', isRunning: runningJobNames.has('Natterbox Fixer'), canStart: true, canStop: true },
-      ];
+      // Override CRO status with real-time check from Sapien
+      scheduledJobs = repoJobs.map(job => ({
+        ...job,
+        isRunning: job.id === 'cro' ? croRunning : job.isRunning,
+      }));
 
       jobsRunning = scheduledJobs.filter(j => j.isRunning).length;
     } catch (e) {
       console.error('Failed to fetch cron jobs:', e);
     }
 
-    // Get the actual Salesforce Organization ID (15-char ID like 00D0000000xxxxx)
+    // Get the actual Salesforce Organization ID
     let orgId = '';
     try {
-      orgId = await getSalesforceOrgId(locals.instanceUrl!, locals.accessToken!);
+      orgId = await getSalesforceOrgId(ctx.instanceUrl, ctx.accessToken);
     } catch (e) {
       console.error('Failed to fetch Salesforce Org ID:', e);
-      // Fallback to subdomain from instance URL
-      orgId = locals.instanceUrl?.match(/https:\/\/([^.]+)/)?.[1] || '';
+      orgId = ctx.instanceUrl?.match(/https:\/\/([^.]+)/)?.[1] || '';
     }
 
     const data: AdminData = {
       inventory: {
-        users: usersResult.totalSize,
-        phoneNumbers: phoneNumbersResult.totalSize,
-        devices: devicesResult.totalSize,
-        groups: groupsResult.totalSize,
-        routingPolicies: routingPoliciesResult.totalSize,
+        users: usersResult.pagination.totalItems,
+        phoneNumbers: phoneNumbersResult.pagination.totalItems,
+        devices: devicesResult.pagination.totalItems,
+        groups: groupsResult.pagination.totalItems,
+        routingPolicies: routingPoliciesResult.pagination.totalItems,
       },
       monitoring: {
-        recordingAccessCount: recordingAccessResult.totalSize,
-        eventLogsToday: eventLogsResult.totalSize,
-        errorLogsToday: errorLogsResult.totalSize,
+        recordingAccessCount,
+        eventLogsToday,
+        errorLogsToday,
       },
       subscriptions,
       subscriptionsUpdated,
       scheduledJobs,
       jobsRunning,
       organizationId: orgId,
-      instanceUrl: locals.instanceUrl || '',
+      instanceUrl: ctx.instanceUrl || '',
       isDemo: false,
     };
 
@@ -270,27 +236,25 @@ export const load: PageServerLoad = async ({ locals }) => {
 
 export const actions: Actions = {
   refreshLicense: async ({ locals }) => {
-    if (!hasValidCredentials(locals)) {
+    const result = tryCreateContextAndRepositories(locals);
+    if (!result) {
       return fail(401, { error: 'Not authenticated' });
     }
 
+    const { ctx, isDemo } = result;
+    if (isDemo || !isSalesforceContext(ctx)) {
+      return fail(400, { error: 'Not available in demo mode' });
+    }
+
     try {
-      // Clear all caches to force a fresh fetch
       clearAllCaches();
-      
-      // Re-fetch API settings
-      await fetchApiSettings(locals.instanceUrl!, locals.accessToken!);
-      
-      // Fetch fresh license from Sapien
-      const license = await getLicenseFromSapien(locals.instanceUrl!, locals.accessToken!);
+      await fetchApiSettings(ctx.instanceUrl, ctx.accessToken);
+      const license = await getLicenseFromSapien(ctx.instanceUrl, ctx.accessToken);
       
       if (!license) {
         return fail(500, { error: 'Failed to fetch license from Sapien' });
       }
 
-      console.log('[Admin] License refreshed successfully');
-      
-      // Return success - the page will reload with fresh data
       return { success: true, message: 'License refreshed successfully' };
     } catch (error) {
       console.error('[Admin] Failed to refresh license:', error);
