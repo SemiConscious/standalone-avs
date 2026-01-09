@@ -75,14 +75,14 @@ const sizes = {
 const onColors = {
   primary: 'bg-primary-500',
   success: 'bg-green-500',
-  error: 'bg-red-500',
+  error: 'bg-error',
   warning: 'bg-amber-500',
 };
 
 // Color configurations for off state
 const offColors = {
   neutral: 'bg-surface-600',
-  error: 'bg-red-500/50',
+  error: 'bg-error/50',
   warning: 'bg-amber-500/50',
 };
 
