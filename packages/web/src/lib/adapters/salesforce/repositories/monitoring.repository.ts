@@ -289,7 +289,20 @@ export class SalesforceMonitoringRepository implements IMonitoringRepository {
   }
 
   async getScheduledJobs(): Promise<import('$lib/repositories/monitoring.repository').ScheduledJobInfo[]> {
-    const jobNames = ['Call Reporting', 'HCRO Processing', 'Availability Logs', 'Call Queue Logs'];
+    const jobNames = [
+      'Call Reporting',
+      'HCRO Processing',
+      'Availability Logs',
+      'Call Queue Logs',
+      'Omni-Channel Status and Group Login Synchroniser',
+      'Wrap-Up Fixer',
+      'Dynamic Dial List Processor',
+      'AI Advisor',
+      'Dynamic Dial List Report Generator',
+      'Transferred Calls for Reporting',
+      'Interaction Reporting',
+      'Natterbox Fixer',
+    ];
     
     try {
       const result = await this.client.query<{
@@ -307,6 +320,16 @@ export class SalesforceMonitoringRepository implements IMonitoringRepository {
         { id: 'cro', name: 'Call Reporting Scheduled Job', isRunning: runningJobNames.has('Call Reporting'), canStart: true, canStop: true },
         { id: 'hcro', name: 'HCRO Processing Scheduled Job', isRunning: runningJobNames.has('HCRO Processing'), canStart: true, canStop: true },
         { id: 'availability', name: 'Availability Logs Scheduled Job', isRunning: runningJobNames.has('Availability Logs'), canStart: true, canStop: true },
+        { id: 'cq', name: 'Call Queue Logs Scheduled Job', isRunning: runningJobNames.has('Call Queue Logs'), canStart: true, canStop: true },
+        { id: 'userServicePresGroupSync', name: 'Omni-Channel Status and Group Login Synchroniser Scheduled Job', isRunning: runningJobNames.has('Omni-Channel Status and Group Login Synchroniser'), canStart: true, canStop: true },
+        { id: 'crFixer', name: 'Wrap-Up Fixer Scheduled Job', isRunning: runningJobNames.has('Wrap-Up Fixer'), canStart: true, canStop: true },
+        { id: 'ddlProcessor', name: 'Dynamic Dial List Processor Scheduled Job', isRunning: runningJobNames.has('Dynamic Dial List Processor'), canStart: true, canStop: true },
+        { id: 'insights', name: 'AI Advisor Scheduled Job', isRunning: runningJobNames.has('AI Advisor'), canStart: true, canStop: true },
+        { id: 'ddlReport', name: 'Dynamic Dial List Report Generator Scheduled Job', isRunning: runningJobNames.has('Dynamic Dial List Report Generator'), canStart: true, canStop: true },
+        { id: 'croTransfers', name: 'Transferred Calls for Reporting Scheduled Job', isRunning: runningJobNames.has('Transferred Calls for Reporting'), canStart: true, canStop: true },
+        { id: 'wrapupEvents', name: 'Digital Channel Wrap-Ups', isRunning: false, canStart: true, canStop: true }, // This checks Session_v1__c.WrapupSubscriptionId__c
+        { id: 'interactionReporting', name: 'Interaction Reporting Scheduled Job', isRunning: runningJobNames.has('Interaction Reporting'), canStart: true, canStop: true },
+        { id: 'natterboxFixer', name: 'Natterbox Fixer Scheduled Job', isRunning: runningJobNames.has('Natterbox Fixer'), canStart: true, canStop: true },
       ];
     } catch (e) {
       console.warn('Failed to fetch scheduled jobs:', e);
@@ -314,6 +337,16 @@ export class SalesforceMonitoringRepository implements IMonitoringRepository {
         { id: 'cro', name: 'Call Reporting Scheduled Job', isRunning: false, canStart: true, canStop: true },
         { id: 'hcro', name: 'HCRO Processing Scheduled Job', isRunning: false, canStart: true, canStop: true },
         { id: 'availability', name: 'Availability Logs Scheduled Job', isRunning: false, canStart: true, canStop: true },
+        { id: 'cq', name: 'Call Queue Logs Scheduled Job', isRunning: false, canStart: true, canStop: true },
+        { id: 'userServicePresGroupSync', name: 'Omni-Channel Status and Group Login Synchroniser Scheduled Job', isRunning: false, canStart: true, canStop: true },
+        { id: 'crFixer', name: 'Wrap-Up Fixer Scheduled Job', isRunning: false, canStart: true, canStop: true },
+        { id: 'ddlProcessor', name: 'Dynamic Dial List Processor Scheduled Job', isRunning: false, canStart: true, canStop: true },
+        { id: 'insights', name: 'AI Advisor Scheduled Job', isRunning: false, canStart: true, canStop: true },
+        { id: 'ddlReport', name: 'Dynamic Dial List Report Generator Scheduled Job', isRunning: false, canStart: true, canStop: true },
+        { id: 'croTransfers', name: 'Transferred Calls for Reporting Scheduled Job', isRunning: false, canStart: true, canStop: true },
+        { id: 'wrapupEvents', name: 'Digital Channel Wrap-Ups', isRunning: false, canStart: true, canStop: true },
+        { id: 'interactionReporting', name: 'Interaction Reporting Scheduled Job', isRunning: false, canStart: true, canStop: true },
+        { id: 'natterboxFixer', name: 'Natterbox Fixer Scheduled Job', isRunning: false, canStart: true, canStop: true },
       ];
     }
   }
