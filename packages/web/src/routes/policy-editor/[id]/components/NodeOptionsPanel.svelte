@@ -153,15 +153,60 @@
   
   // Check if we're viewing a child item
   const isViewingChild = $derived(!!activeChildId && !!activeChildData);
-  
+
   // Active tab state
   let activeTab = $state<'configuration' | 'link' | 'apps'>('configuration');
-  
+
+  /**
+   * Check if a child item supports output connectors
+   * This matches the logic in FlowNode.svelte's childSupportsOutput function
+   */
+  function childSupportsOutput(childData: Record<string, unknown> | null): boolean {
+    if (!childData) return false;
+    
+    // If explicitly set to false, don't show link tab
+    if (childData.outputConnectorsAllowed === false) return false;
+    // If explicitly set to true, show link tab
+    if (childData.outputConnectorsAllowed === true) return true;
+    
+    // Entry point nodes' children don't have individual output connectors
+    const parentType = node?.type || '';
+    const parentTemplateClass = node?.data?.templateClass as string || '';
+    
+    const entryPointTypes = [
+      'inboundNumber', 'extensionNumber', 'inboundMessage', 'fromPolicy',
+      'sipTrunk', 'invokableDestination', 'digital', 'ddi'
+    ];
+    const entryPointClasses = [
+      'ModNumber', 'ModNumber_Public', 'ModFromPolicy', 'ModExtension',
+      'ModInboundMessage', 'ModSipTrunk', 'ModInvokable', 'ModDigital'
+    ];
+    
+    if (entryPointTypes.includes(parentType) || entryPointClasses.includes(parentTemplateClass)) {
+      return false;
+    }
+    
+    // Default: check templateClass - some apps don't support outputs
+    // Apps like Speak, Record, Notify just pass control to next child
+    const childTemplateClass = (childData.templateClass as string) || '';
+    const noOutputClasses = [
+      'ModAction_Say', 'ModAction_Record', 'ModAction_Notify',
+      'ModAction_Pause', 'ModAction_Debug', 'ModAction_Log',
+      'ModAction_SetProperty', 'ModAction_ManageProperty'
+    ];
+    
+    return !noOutputClasses.includes(childTemplateClass);
+  }
+
   // Determine which tabs are available based on node type (or child type when viewing a child)
   const availableTabs = $derived(() => {
-    // When viewing a child, only show Configuration and Link tabs
+    // When viewing a child, show Configuration + Link only if child supports output connectors
     if (isViewingChild) {
-      return ['configuration', 'link'] as const;
+      const hasOutputConnectors = childSupportsOutput(activeChildData);
+      if (hasOutputConnectors) {
+        return ['configuration', 'link'] as const;
+      }
+      return ['configuration'] as const;
     }
     
     const type = node?.type || '';
