@@ -24,9 +24,9 @@
     "jsforce": "^3.6.2"
   },
   "devDependencies": {
-    "@types/node": "^22.10.2",
+    "@types/node": "^25.0.6",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "vitest": "^4.0.16"
   },
   "files": [
     "dist"
