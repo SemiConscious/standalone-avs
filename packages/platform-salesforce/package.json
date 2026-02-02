@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@avs/core": "workspace:*",
-    "jsforce": "^3.6.2"
+    "jsforce": "^3.10.13"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
