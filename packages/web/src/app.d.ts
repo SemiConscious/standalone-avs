@@ -3,6 +3,7 @@
 
 import type { ErrorCode } from '$lib/errors';
 import type { PlatformType, SalesforceAuth, DynamicsAuth } from '$lib/platform';
+import type { CharlieSession, CharliePublicConfig } from '$lib/charlie';
 
 declare global {
   namespace App {
@@ -17,7 +18,7 @@ declare global {
 
     /**
      * Server-side locals available in hooks and load functions
-     * 
+     *
      * Platform is always set - determined at the edge in hooks.server.ts
      * Platform-specific auth is only present when authenticated
      */
@@ -61,6 +62,15 @@ declare global {
 
       /** @deprecated Use locals.salesforce?.instanceUrl instead */
       instanceUrl?: string;
+
+      // =================================================================
+      // Charlie integration (see docs/STANDALONE_AVS_INTEGRATION.md in
+      // the charlie-api repo). Populated by hooks.server.ts after the SF
+      // auth completes; absent when Charlie isn't configured for this
+      // env or token-exchange failed (which is the Phase-0 expected
+      // case, before SalesforceIdentityProvider lands in @charlie/auth).
+      // =================================================================
+      charlieSession?: CharlieSession;
     }
 
     /**
@@ -73,6 +83,8 @@ declare global {
       platform?: PlatformType;
       /** Whether in demo mode */
       isDemo?: boolean;
+      /** Charlie URLs + feature flags exposed to the browser-side webphone + subscription client. */
+      charlie?: CharliePublicConfig;
     }
 
     /**
@@ -87,4 +99,4 @@ declare global {
   }
 }
 
-export {};
+export { };
