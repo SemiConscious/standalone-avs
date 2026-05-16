@@ -1,10 +1,10 @@
 /**
  * SvelteKit Server Hooks
- * 
+ *
  * This is the single source of truth for platform determination and authentication.
  * Platform is determined ONCE at the edge based on hostname/env and is immutable
  * for the entire request lifecycle.
- * 
+ *
  * Security guarantees:
  * 1. No cross-platform leakage - platform is set once and cannot change
  * 2. No fallback to demo - if Salesforce auth fails, redirect to login, NOT demo
@@ -12,6 +12,7 @@
  */
 
 import type { Handle } from '@sveltejs/kit';
+import { env } from '$env/dynamic/private';
 import {
   determinePlatform,
   handlePlatformAuth,
@@ -19,6 +20,7 @@ import {
   getLoginUrl,
   type SalesforceAuth,
 } from '$lib/platform';
+import { exchangeSalesforceAccessTokenForCharlieJwt } from '$lib/charlie';
 
 export const handle: Handle = async ({ event, resolve }) => {
   // ==========================================================================
@@ -47,6 +49,36 @@ export const handle: Handle = async ({ event, resolve }) => {
       event.locals.refreshToken = sfAuth.refreshToken;
       event.locals.instanceUrl = sfAuth.instanceUrl;
       event.locals.user = sfAuth.user;
+
+      // ====================================================================
+      // Step 2a: Exchange the SF access token for a Charlie session JWT.
+      //
+      // See charlie-api/docs/STANDALONE_AVS_INTEGRATION.md §4. In Phase 0
+      // Charlie returns 501 (SalesforceIdentityProvider not yet
+      // registered) — that's expected; we log it once per request and
+      // continue. Pages that try to call Charlie GraphQL without
+      // locals.charlieSession get a typed `null` and degrade gracefully.
+      //
+      // Future improvement: cache the issued JWT in an httpOnly cookie
+      // keyed by SF access-token hash, so we only round-trip Charlie
+      // once per SF session rather than once per request.
+      // ====================================================================
+      const tokenExchangeBase = env.CHARLIE_TOKEN_EXCHANGE_BASE ?? null;
+      const charlieResult = await exchangeSalesforceAccessTokenForCharlieJwt(
+        sfAuth.accessToken,
+        tokenExchangeBase,
+        event.fetch
+      );
+      if (charlieResult.ok) {
+        event.locals.charlieSession = charlieResult.session;
+      } else if (
+        charlieResult.reason !== 'NOT_IMPLEMENTED' &&
+        charlieResult.reason !== 'NOT_CONFIGURED'
+      ) {
+        console.warn(
+          `[charlie] token exchange failed: ${charlieResult.reason} (${charlieResult.httpStatus}) ${charlieResult.message}`
+        );
+      }
     }
 
     // If protected route and not authenticated, redirect to login
