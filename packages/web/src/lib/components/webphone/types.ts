@@ -49,12 +49,30 @@ export interface WebphoneStatus {
   wsUrl: string | null;
 }
 
-export type WebphoneAgentAvailability = 'AVAILABLE' | 'BUSY' | 'AWAY' | 'OFFLINE' | 'WRAPUP';
+/**
+ * Mirrors `AgentAvailabilityEnum` in
+ * `charlie-api/packages/server/src/schema/agent.graphql`. Keep in lockstep
+ * with the schema — if Charlie adds a new variant, add it here too.
+ */
+export type WebphoneAgentAvailability =
+  | 'AVAILABLE'
+  | 'ON_BREAK'
+  | 'BUSY'
+  | 'AWAY'
+  | 'OFFLINE';
 
+/**
+ * Mirrors the `AgentState` type in
+ * `charlie-api/packages/server/src/schema/agent.graphql`. `organizationId`
+ * + `userId` + `availability` + `since` are non-null in the schema; the
+ * `null`-able shape here is for the local pre-bootstrap state before the
+ * first `getAgentState` resolves.
+ */
 export interface AgentSnapshot {
+  organizationId: number | null;
   userId: number | null;
   availability: WebphoneAgentAvailability;
   availabilityProfile: string | null;
-  wrapupCallId: string | null;
-  sinceTimestamp: string | null;
+  since: string | null;
+  wrapupCode: string | null;
 }

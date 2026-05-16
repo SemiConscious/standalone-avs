@@ -22,9 +22,9 @@
 
   const availabilityOptions: readonly WebphoneAgentAvailability[] = [
     'AVAILABLE',
+    'ON_BREAK',
     'BUSY',
     'AWAY',
-    'WRAPUP',
     'OFFLINE',
   ];
 
@@ -37,26 +37,27 @@
     if (!charlieClient || !userId) return;
     try {
       type GetAgentStateResponse = {
-        getAgentState: { agent: AgentSnapshot | null };
+        getAgentState: { state: AgentSnapshot | null };
       };
       const result = await charlieClient.request<GetAgentStateResponse>(
         CharlieOperations.GetAgentStateQuery,
-        { input: { userId } }
+        { input: { userId } },
       );
-      if (result.getAgentState.agent) {
-        setAgentSnapshot(result.getAgentState.agent);
+      if (result.getAgentState.state) {
+        setAgentSnapshot(result.getAgentState.state);
       }
     } catch (err) {
       console.warn('[agent] initial getAgentState failed', err);
     }
 
-    const sub = subscribeStore<{ onAgentStateChanged: { agent: AgentSnapshot } }>(
-      CharlieOperations.OnAgentStateChangedSubscription
+    const sub = subscribeStore<{ onAgentStateChanged: { state: AgentSnapshot } }>(
+      CharlieOperations.OnAgentStateChangedSubscription,
+      { userId },
     );
     unsubscribe = sub.unsubscribe;
     sub.store.subscribe((value) => {
-      if (value?.onAgentStateChanged?.agent) {
-        setAgentSnapshot(value.onAgentStateChanged.agent);
+      if (value?.onAgentStateChanged?.state) {
+        setAgentSnapshot(value.onAgentStateChanged.state);
       }
     });
   });
@@ -65,11 +66,11 @@
     unsubscribe?.();
   });
 
-  async function changeAvailability(availability: WebphoneAgentAvailability): Promise<void> {
+  async function changeAvailability(state: WebphoneAgentAvailability): Promise<void> {
     if (!charlieClient) return;
     try {
       await charlieClient.request(CharlieOperations.SetAvailabilityMutation, {
-        input: { availability },
+        input: { state },
       });
     } catch (err) {
       console.error('[agent] setAvailability failed', err);
@@ -114,8 +115,12 @@
     background: rgba(248, 113, 113, 0.15);
   }
 
-  .agent-state[data-availability='WRAPUP'] {
+  .agent-state[data-availability='ON_BREAK'] {
     background: rgba(251, 191, 36, 0.2);
+  }
+
+  .agent-state[data-availability='AWAY'] {
+    background: rgba(148, 163, 184, 0.2);
   }
 
   .agent-state select {

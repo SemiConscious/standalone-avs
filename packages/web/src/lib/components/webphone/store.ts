@@ -26,11 +26,12 @@ export const callLegList: Readable<readonly CallLeg[]> = derived(callLegs, ($leg
 
 /** Agent state widget — bound to `Query.getAgentState` + `Subscription.onAgentStateChanged`. */
 export const agentSnapshot: Writable<AgentSnapshot> = writable({
+  organizationId: null,
   userId: null,
   availability: 'OFFLINE',
   availabilityProfile: null,
-  wrapupCallId: null,
-  sinceTimestamp: null,
+  since: null,
+  wrapupCode: null,
 });
 
 // =============================================================================

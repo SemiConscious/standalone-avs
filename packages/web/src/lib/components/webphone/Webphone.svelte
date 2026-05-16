@@ -27,6 +27,7 @@
     type MediaTransportConfig,
     type WebphoneClientEvent,
   } from './WebphoneClient';
+  import AgentState from './AgentState.svelte';
   import {
     callLegList,
     webphoneStatus,
@@ -46,6 +47,7 @@
   let { appsyncHttp, appsyncWss, mockRegistrarWsUrl }: Props = $props();
 
   let charlieClient = $state<BrowserCharlieClient | null>(null);
+  let charlieUserId = $state<number | null>(null);
   let webphoneClient: WebphoneClient | null = null;
   let unsubscribeCallEvent: (() => void) | null = null;
   let unsubscribeWpEvents: (() => void) | null = null;
@@ -71,9 +73,16 @@
         bootError = `Charlie JWT unavailable: ${body.reason ?? jwtResponse.status} ${body.message ?? ''}`;
         return;
       }
-      const jwtBody = (await jwtResponse.json()) as { ok: true; jwt: string; expiresAt: number };
+      const jwtBody = (await jwtResponse.json()) as {
+        ok: true;
+        jwt: string;
+        expiresAt: number;
+        userId: number;
+        organizationId: number;
+      };
 
       charlieClient = new BrowserCharlieClient(appsyncHttp, jwtBody.jwt, jwtBody.expiresAt);
+      charlieUserId = jwtBody.userId;
 
       // 2) Configure the realtime client (graphql-ws) before subscribing.
       configureRealtimeClient({
@@ -362,6 +371,10 @@
 
   {#if bootError}
     <div class="webphone-boot-error" role="alert">{bootError}</div>
+  {/if}
+
+  {#if charlieClient && charlieUserId !== null}
+    <AgentState charlieClient={charlieClient} userId={charlieUserId} />
   {/if}
 
   <form

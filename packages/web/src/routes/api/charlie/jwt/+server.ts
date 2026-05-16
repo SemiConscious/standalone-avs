@@ -57,6 +57,8 @@ export const POST: RequestHandler = async ({ locals, fetch }) => {
     jwt: result.session.jwt,
     expiresAt: result.session.expiresAt,
     scopes: result.session.scopes,
+    userId: result.session.userId,
+    organizationId: result.session.organizationId,
   };
   return json(payload);
 };

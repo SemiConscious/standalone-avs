@@ -63,13 +63,17 @@ export interface CharliePublicConfig {
 /**
  * The browser-scoped Charlie JWT returned by `/api/charlie/jwt`. Same shape
  * as `CharlieSession` minus the high-level scopes (browser tokens only get
- * the call/agent/media scopes the webphone needs).
+ * the call/agent/media scopes the webphone needs). Identity fields
+ * (`userId`, `organizationId`) are included so the browser doesn't have to
+ * decode the JWT body itself to bind webphone components to the right user.
  */
 export interface BrowserJwtResponse {
   ok: true;
   jwt: string;
   expiresAt: number;
   scopes: readonly string[];
+  userId: number;
+  organizationId: number;
 }
 
 export interface BrowserJwtErrorResponse {

@@ -78,12 +78,13 @@ export const GetAgentStateQuery = gql`
   query GetAgentState($input: GetAgentStateInput!) {
     getAgentState(input: $input) {
       correlationId
-      agent {
+      state {
+        organizationId
         userId
         availability
         availabilityProfile
-        wrapupCallId
-        sinceTimestamp
+        since
+        wrapupCode
       }
       errors {
         code
@@ -98,11 +99,12 @@ export const SetAvailabilityMutation = gql`
     setAvailability(input: $input) {
       correlationId
       accepted
-      agent {
+      state {
+        organizationId
         userId
         availability
         availabilityProfile
-        sinceTimestamp
+        since
       }
       errors {
         code
@@ -117,10 +119,11 @@ export const WrapupCompleteMutation = gql`
     wrapupComplete(input: $input) {
       correlationId
       accepted
-      agent {
+      state {
+        organizationId
         userId
         availability
-        wrapupCallId
+        wrapupCode
       }
       errors {
         code
@@ -131,15 +134,16 @@ export const WrapupCompleteMutation = gql`
 `;
 
 export const OnAgentStateChangedSubscription = gql`
-  subscription OnAgentStateChanged {
-    onAgentStateChanged {
+  subscription OnAgentStateChanged($userId: Int) {
+    onAgentStateChanged(userId: $userId) {
       correlationId
-      agent {
+      state {
+        organizationId
         userId
         availability
         availabilityProfile
-        wrapupCallId
-        sinceTimestamp
+        since
+        wrapupCode
       }
     }
   }
