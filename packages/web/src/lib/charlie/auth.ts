@@ -16,7 +16,17 @@
 
 import type { CharlieSession, TokenExchangeResult } from './types';
 
-const SALESFORCE_SUBJECT_TOKEN_TYPE = 'urn:nbox:idp:salesforce';
+/**
+ * Charlie's CRM-agnostic introspection-callback token type. Charlie POSTs
+ * the subject token back to our registered introspection endpoint
+ * (`/api/charlie/introspect`); we verify it and return RFC 7662 + x_nbox
+ * claims. See `charlie-api/docs/STANDALONE_AVS_INTEGRATION.md` §4.
+ *
+ * Phase 0 originally used `urn:nbox:idp:salesforce`, which would have
+ * required Natterbox to ship a per-CRM `SalesforceIdentityProvider`.
+ * The callback flow removes that gate.
+ */
+const CALLBACK_SUBJECT_TOKEN_TYPE = 'urn:nbox:idp:callback';
 const TOKEN_EXCHANGE_GRANT_TYPE = 'urn:ietf:params:oauth:grant-type:token-exchange';
 
 const DEFAULT_BROWSER_SCOPES = [
@@ -28,21 +38,28 @@ const DEFAULT_BROWSER_SCOPES = [
 ] as const;
 
 /**
- * Exchange a Salesforce access token for a Charlie session JWT.
+ * Exchange a Salesforce access token for a Charlie session JWT via the
+ * `urn:nbox:idp:callback` flow. Charlie verifies the SF token by calling
+ * back to our registered `/api/charlie/introspect` endpoint — which is
+ * what runs the SF userinfo round-trip on our end. Charlie itself stays
+ * CRM-agnostic; everything Salesforce-specific lives on our side.
  *
  * @param salesforceAccessToken Bearer token from the SF cookie session.
  * @param tokenExchangeBase Base URL of Charlie's token-exchange endpoint
  *   (typically `https://auth.dev.charlie.natterbox-dev03.net`). When `null`
  *   the function short-circuits with `NOT_CONFIGURED`.
- * @param requestedScopes Optional scope subset. Defaults to the
- *   `users:read`-style scopes a SvelteKit `+page.server.ts` would need —
- *   tighten / loosen at the call site if appropriate.
+ * @param clientId Our registered Charlie partner client_id (the value the
+ *   admin portal at `<tokenExchangeBase>/admin/` returns when the client
+ *   is created). Charlie looks it up to find our introspection URL. When
+ *   `null` the function short-circuits with `NOT_CONFIGURED`.
+ * @param requestedScopes Optional scope subset.
  */
 export async function exchangeSalesforceAccessTokenForCharlieJwt(
   salesforceAccessToken: string,
   tokenExchangeBase: string | null,
+  clientId: string | null,
   fetchImpl: typeof fetch = fetch,
-  requestedScopes?: readonly string[]
+  requestedScopes?: readonly string[],
 ): Promise<TokenExchangeResult> {
   if (!tokenExchangeBase) {
     return {
@@ -52,11 +69,21 @@ export async function exchangeSalesforceAccessTokenForCharlieJwt(
       httpStatus: 0,
     };
   }
+  if (!clientId) {
+    return {
+      ok: false,
+      reason: 'NOT_CONFIGURED',
+      message:
+        "CHARLIE_PARTNER_CLIENT_ID env var is unset; Charlie can't look up our introspection URL without it.",
+      httpStatus: 0,
+    };
+  }
 
   const body = new URLSearchParams({
     grant_type: TOKEN_EXCHANGE_GRANT_TYPE,
     subject_token: salesforceAccessToken,
-    subject_token_type: SALESFORCE_SUBJECT_TOKEN_TYPE,
+    subject_token_type: CALLBACK_SUBJECT_TOKEN_TYPE,
+    client_id: clientId,
   });
   if (requestedScopes && requestedScopes.length > 0) {
     body.set('scope', requestedScopes.join(' '));
@@ -86,8 +113,9 @@ export async function exchangeSalesforceAccessTokenForCharlieJwt(
       ok: false,
       reason: 'NOT_IMPLEMENTED',
       message:
-        'Charlie /token/exchange returned 501 — SalesforceIdentityProvider not yet registered ' +
-        '(see STANDALONE_AVS_INTEGRATION.md §4 + sequencing Phase 1.1).',
+        'Charlie /token/exchange returned 501 — no provider registered for ' +
+        `subject_token_type=${CALLBACK_SUBJECT_TOKEN_TYPE}. Check that the ` +
+        'CallbackIntrospectionProvider is wired in Charlie\'s tokenExchange Lambda.',
       httpStatus: 501,
     };
   }
@@ -119,9 +147,8 @@ export async function exchangeSalesforceAccessTokenForCharlieJwt(
     return {
       ok: false,
       reason: 'NETWORK_ERROR',
-      message: `Failed to parse Charlie /token/exchange JSON response: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
+      message: `Failed to parse Charlie /token/exchange JSON response: ${err instanceof Error ? err.message : String(err)
+        }`,
       httpStatus: response.status,
     };
   }
@@ -164,13 +191,15 @@ export async function exchangeSalesforceAccessTokenForCharlieJwt(
 export function exchangeForBrowserJwt(
   salesforceAccessToken: string,
   tokenExchangeBase: string | null,
-  fetchImpl: typeof fetch = fetch
+  clientId: string | null,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<TokenExchangeResult> {
   return exchangeSalesforceAccessTokenForCharlieJwt(
     salesforceAccessToken,
     tokenExchangeBase,
+    clientId,
     fetchImpl,
-    DEFAULT_BROWSER_SCOPES
+    DEFAULT_BROWSER_SCOPES,
   );
 }
 

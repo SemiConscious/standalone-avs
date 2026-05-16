@@ -32,7 +32,13 @@ export const POST: RequestHandler = async ({ locals, fetch }) => {
   }
 
   const tokenExchangeBase = env.CHARLIE_TOKEN_EXCHANGE_BASE ?? null;
-  const result = await exchangeForBrowserJwt(sfAccessToken, tokenExchangeBase, fetch);
+  const partnerClientId = env.CHARLIE_PARTNER_CLIENT_ID ?? null;
+  const result = await exchangeForBrowserJwt(
+    sfAccessToken,
+    tokenExchangeBase,
+    partnerClientId,
+    fetch,
+  );
 
   if (!result.ok) {
     const payload: BrowserJwtErrorResponse = {

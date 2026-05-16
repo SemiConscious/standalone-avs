@@ -51,22 +51,27 @@ export const handle: Handle = async ({ event, resolve }) => {
       event.locals.user = sfAuth.user;
 
       // ====================================================================
-      // Step 2a: Exchange the SF access token for a Charlie session JWT.
+      // Step 2a: Exchange the SF access token for a Charlie session JWT
+      // via the urn:nbox:idp:callback flow. Charlie verifies the SF token
+      // by calling /api/charlie/introspect on this server (see
+      // routes/api/charlie/introspect/+server.ts); we map the SF identity
+      // to a Natterbox user and return RFC 7662 + x_nbox claims.
       //
-      // See charlie-api/docs/STANDALONE_AVS_INTEGRATION.md §4. In Phase 0
-      // Charlie returns 501 (SalesforceIdentityProvider not yet
-      // registered) — that's expected; we log it once per request and
-      // continue. Pages that try to call Charlie GraphQL without
-      // locals.charlieSession get a typed `null` and degrade gracefully.
+      // See charlie-api/docs/STANDALONE_AVS_INTEGRATION.md §4. Failures
+      // are surfaced as typed reasons on the result; NOT_IMPLEMENTED /
+      // NOT_CONFIGURED don't even log (expected during env bootstrap),
+      // other failures warn so the operator notices.
       //
       // Future improvement: cache the issued JWT in an httpOnly cookie
       // keyed by SF access-token hash, so we only round-trip Charlie
       // once per SF session rather than once per request.
       // ====================================================================
       const tokenExchangeBase = env.CHARLIE_TOKEN_EXCHANGE_BASE ?? null;
+      const partnerClientId = env.CHARLIE_PARTNER_CLIENT_ID ?? null;
       const charlieResult = await exchangeSalesforceAccessTokenForCharlieJwt(
         sfAuth.accessToken,
         tokenExchangeBase,
+        partnerClientId,
         event.fetch
       );
       if (charlieResult.ok) {

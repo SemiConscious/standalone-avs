@@ -21,6 +21,7 @@
     "graphql": "^16.14.0",
     "graphql-request": "^7.4.0",
     "graphql-ws": "^6.0.8",
+    "jose": "^6.2.3",
     "jssip": "^3.13.8",
     "lodash-es": "^4.17.22",
     "lucide-svelte": "^0.468.0",
