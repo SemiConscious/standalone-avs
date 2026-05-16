@@ -75,9 +75,8 @@ export const POST: RequestHandler = async ({ request, url, fetch }) => {
     verifiedClaims = payload;
   } catch (err) {
     throw error(401, {
-      message: `Charlie request JWT verification failed: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
+      message: `Charlie request JWT verification failed: ${err instanceof Error ? err.message : String(err)
+        }`,
     });
   }
 
@@ -91,10 +90,18 @@ export const POST: RequestHandler = async ({ request, url, fetch }) => {
   }
 
   // ---------------------------------------------------------------------------
-  // Parse the form-encoded body Charlie sent (RFC 7662 §2.1).
+  // Parse the JSON body Charlie sent. (Charlie sends JSON rather than the
+  // RFC 7662 form-encoded shape to dodge framework CSRF guards on the
+  // partner side — SvelteKit, Next.js, etc. all block cross-origin form
+  // POSTs by default.)
   // ---------------------------------------------------------------------------
-  const formParams = new URLSearchParams(bodyText);
-  const subjectToken = formParams.get('token');
+  let parsed: { token?: unknown };
+  try {
+    parsed = JSON.parse(bodyText) as { token?: unknown };
+  } catch {
+    return inactiveResponse('NON_JSON_BODY');
+  }
+  const subjectToken = typeof parsed.token === 'string' ? parsed.token : null;
   if (!subjectToken) {
     return inactiveResponse('MISSING_TOKEN');
   }
@@ -144,8 +151,8 @@ export const POST: RequestHandler = async ({ request, url, fetch }) => {
   // intersect this with the requested scopes upstream.
   const grantedScopes = (env.CHARLIE_INTROSPECTION_GRANTED_SCOPES ??
     'users:read users:admin groups:read groups:admin devices:read devices:admin ' +
-      'phoneNumbers:read phoneNumbers:admin routingPolicies:read routingPolicies:admin ' +
-      'calls:read calls:control calls:supervise agent:read agent:control media:read').trim();
+    'phoneNumbers:read phoneNumbers:admin routingPolicies:read routingPolicies:admin ' +
+    'calls:read calls:control calls:supervise agent:read agent:control media:read').trim();
 
   return new Response(
     JSON.stringify({
