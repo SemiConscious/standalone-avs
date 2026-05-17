@@ -23,12 +23,21 @@
  * because we don't yet have a SOQL-backed lookup wired here. Real
  * identity mapping (e.g. against a Natterbox_User_Id__c custom field
  * on the SF User) is Phase 2 work.
+ *
+ * Variant 7 (Sapien data-plane bootstrap): the response includes
+ * `sapienAccessToken` + `sapienAccessTokenExpiresAt` under `x_nbox` when
+ * the SF org has AVS installed (i.e. `nbavs__API_v1__c` carries Sapien
+ * OAuth credentials). Charlie writes both fields into its session-store
+ * DynamoDB row so its dispatcher can call Sapien on the user's behalf
+ * without holding any Sapien credentials itself. See
+ * `charlie-api/docs/CRM_INTEGRATION_GUIDE.md` §"What the partner returns".
  */
 
 import { error, type RequestHandler } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { createHash } from 'node:crypto';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { getSapienAccessTokenWithExpiry } from '$lib/server/gatekeeper';
 
 const SF_USERINFO_DEFAULT = 'https://login.salesforce.com/services/oauth2/userinfo';
 
@@ -150,19 +159,67 @@ export const POST: RequestHandler = async ({ request, url, fetch }) => {
     'phoneNumbers:read phoneNumbers:admin routingPolicies:read routingPolicies:admin ' +
     'calls:read calls:control calls:supervise agent:read agent:control media:read').trim();
 
-  // The `x_nbox` block carries Natterbox identity (`organizationId`,
-  // `userId`) plus optional CRM-side identity attestation (`sfUserId`,
-  // `sfOrgId`) for audit. We deliberately do NOT include CRM
-  // credentials (access tokens, refresh tokens, instance URLs) — Charlie
-  // is partner-CRM-agnostic on its data plane and has no consumer for
-  // them. A previous revision sent a `crmContext` block carrying the
-  // SF access token + instance URL; that pipeline (the dispatcher-side
-  // `crm` claim, `CrmContextCipher`, `@charlie/adapters-salesforce`)
-  // has been retired. Defence in depth: even if Charlie were
-  // compromised, it would not have the SF token to lift.
+  // ---------------------------------------------------------------------------
+  // Variant 7 — mint a Sapien access token for the caller's org and ship
+  // it alongside the identity claims. Charlie uses it as the Gatekeeper
+  // bearer to mint per-user Sapien JWTs. We use the existing AVS
+  // password-grant code path (lib/server/gatekeeper.ts) which reads the
+  // OAuth credentials from `nbavs__API_v1__c` and POSTs to
+  // `${sapien}/auth/token`.
   //
-  // The SF userinfo call above stays — it proves SF-token liveness and
-  // produces the identity attestation we ship.
+  // If AVS isn't installed in the SF org, or the SF user lacks read on
+  // the custom setting, we log + omit the field. Charlie tolerates the
+  // omission: Sapien-backed resolvers fail cleanly with SESSION_NOT_FOUND
+  // / PlatformError, non-Sapien work continues to function.
+  // ---------------------------------------------------------------------------
+  let sapienAccessToken: string | undefined;
+  let sapienAccessTokenExpiresAt: number | undefined;
+  const instanceUrl = env.CHARLIE_INTROSPECTION_SF_INSTANCE_URL ?? userinfo.urls?.rest?.split('/services/')[0];
+  if (instanceUrl) {
+    try {
+      const sapien = await getSapienAccessTokenWithExpiry(instanceUrl, subjectToken);
+      sapienAccessToken = sapien.accessToken;
+      sapienAccessTokenExpiresAt = Math.floor(sapien.expiresAt.getTime() / 1000);
+    } catch (err) {
+      // Don't fail the whole introspection — Charlie copes with
+      // missing-token sessions. Just log so an operator can investigate
+      // why this partner's Sapien provisioning is broken.
+      console.warn(
+        '[charlie/introspect] Sapien access-token acquisition failed; ' +
+          'returning identity-only response. Sapien-backed Charlie resolvers will return SESSION_NOT_FOUND. ' +
+          `Error: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  // The `x_nbox` block carries Natterbox identity + the Sapien access
+  // token from variant 7. We deliberately do NOT include partner-CRM
+  // credentials (SF access tokens, refresh tokens, instance URLs) —
+  // Charlie is partner-CRM-agnostic on its data plane and has no
+  // consumer for them. A previous revision sent a `crmContext` block
+  // carrying the SF access token + instance URL; that pipeline (the
+  // dispatcher-side `crm` claim, `CrmContextCipher`,
+  // `@charlie/adapters-salesforce`) has been retired. Defence in depth:
+  // even if Charlie were compromised, it would not have the SF token to
+  // lift.
+  //
+  // The Sapien access token IS shipped — but Sapien is the
+  // Natterbox-shared platform that every Charlie consumer ultimately
+  // reaches, not a partner-CRM credential. The token is org-scoped
+  // (one Natterbox org per `nbavs__API_v1__c` credential set), short-
+  // lived (Sapien's expires_in), and stored Charlie-side keyed by JWT
+  // jti so the JWT body never carries it.
+  const xNbox: Record<string, unknown> = {
+    organizationId: orgId,
+    userId: userId,
+    sfUserId: userinfo.user_id,
+    sfOrgId: userinfo.organization_id,
+  };
+  if (sapienAccessToken && sapienAccessTokenExpiresAt) {
+    xNbox['sapienAccessToken'] = sapienAccessToken;
+    xNbox['sapienAccessTokenExpiresAt'] = sapienAccessTokenExpiresAt;
+  }
+
   return new Response(
     JSON.stringify({
       active: true,
@@ -170,12 +227,7 @@ export const POST: RequestHandler = async ({ request, url, fetch }) => {
       sub: `sf:${userinfo.user_id}`,
       exp: Math.floor(Date.now() / 1000) + 3600,
       scope: grantedScopes,
-      x_nbox: {
-        organizationId: orgId,
-        userId: userId,
-        sfUserId: userinfo.user_id,
-        sfOrgId: userinfo.organization_id,
-      },
+      x_nbox: xNbox,
     }),
     {
       status: 200,

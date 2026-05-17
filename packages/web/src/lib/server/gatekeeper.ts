@@ -488,6 +488,31 @@ export async function getSapienAccessToken(
   accessToken: string,
   forceRefresh: boolean = false
 ): Promise<string> {
+  const { accessToken: token } = await getSapienAccessTokenWithExpiry(
+    instanceUrl,
+    accessToken,
+    forceRefresh
+  );
+  return token;
+}
+
+/**
+ * Same as `getSapienAccessToken` but returns the expiry alongside the token.
+ *
+ * Added for the Charlie introspection endpoint (variant 7), which needs to
+ * cap the issued session JWT's `exp` claim at the Sapien token's expiry so
+ * the JWT and the underlying Sapien token can never outlive each other.
+ *
+ * Charlie's `/token/exchange` writes both fields into its
+ * `charlie-{stage}-sessions` DynamoDB table keyed by the issued JWT's
+ * `jti`; the dispatcher's `@charlie/adapters-sapien.PartnerSuppliedSapienAuth`
+ * reads them back on each Sapien-bound resolver call.
+ */
+export async function getSapienAccessTokenWithExpiry(
+  instanceUrl: string,
+  accessToken: string,
+  forceRefresh: boolean = false
+): Promise<{ accessToken: string; expiresAt: Date }> {
   // Ensure we have API settings
   if (!cachedApiSettings) {
     console.log('[Gatekeeper] Fetching API settings for Sapien access token...');
@@ -497,7 +522,10 @@ export async function getSapienAccessToken(
   // Check if we have a valid cached session
   if (!forceRefresh && cachedSapienSession && cachedSapienSession.expiresAt > new Date()) {
     console.log('[Gatekeeper] Using cached Sapien access token');
-    return cachedSapienSession.accessToken;
+    return {
+      accessToken: cachedSapienSession.accessToken,
+      expiresAt: cachedSapienSession.expiresAt,
+    };
   }
 
   // Clear cache if forcing refresh
@@ -509,8 +537,8 @@ export async function getSapienAccessToken(
   // Authenticate with Sapien
   console.log('[Gatekeeper] Authenticating with Sapien to get access token...');
   const session = await authenticateWithSapien(cachedApiSettings!);
-  
-  return session.accessToken;
+
+  return { accessToken: session.accessToken, expiresAt: session.expiresAt };
 }
 
 /**
