@@ -130,10 +130,6 @@ export const POST: RequestHandler = async ({ request, url, fetch }) => {
     return inactiveResponse('SF_USERINFO_MISSING_FIELDS');
   }
 
-  const instanceUrl = userinfo.urls?.rest
-    ? new URL(userinfo.urls.rest).origin
-    : (env.CHARLIE_SF_INSTANCE_URL ?? '');
-
   // ---------------------------------------------------------------------------
   // Map SF identity -> Natterbox numeric ids. Phase 1.1 stub.
   // ---------------------------------------------------------------------------
@@ -154,6 +150,19 @@ export const POST: RequestHandler = async ({ request, url, fetch }) => {
     'phoneNumbers:read phoneNumbers:admin routingPolicies:read routingPolicies:admin ' +
     'calls:read calls:control calls:supervise agent:read agent:control media:read').trim();
 
+  // The `x_nbox` block carries Natterbox identity (`organizationId`,
+  // `userId`) plus optional CRM-side identity attestation (`sfUserId`,
+  // `sfOrgId`) for audit. We deliberately do NOT include CRM
+  // credentials (access tokens, refresh tokens, instance URLs) — Charlie
+  // is partner-CRM-agnostic on its data plane and has no consumer for
+  // them. A previous revision sent a `crmContext` block carrying the
+  // SF access token + instance URL; that pipeline (the dispatcher-side
+  // `crm` claim, `CrmContextCipher`, `@charlie/adapters-salesforce`)
+  // has been retired. Defence in depth: even if Charlie were
+  // compromised, it would not have the SF token to lift.
+  //
+  // The SF userinfo call above stays — it proves SF-token liveness and
+  // produces the identity attestation we ship.
   return new Response(
     JSON.stringify({
       active: true,
@@ -164,13 +173,8 @@ export const POST: RequestHandler = async ({ request, url, fetch }) => {
       x_nbox: {
         organizationId: orgId,
         userId: userId,
-        crmContext: {
-          type: 'salesforce',
-          accessToken: subjectToken,
-          instanceUrl,
-          sfUserId: userinfo.user_id,
-          sfOrgId: userinfo.organization_id,
-        },
+        sfUserId: userinfo.user_id,
+        sfOrgId: userinfo.organization_id,
       },
     }),
     {
