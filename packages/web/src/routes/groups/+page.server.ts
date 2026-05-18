@@ -15,9 +15,9 @@ import {
   CharlieOperations,
   projectCharlieGroup,
   projectConnectionPagination,
-  tryGetCharlieClient,
   type CharlieConnection,
 } from '$lib/charlie';
+import { tryGetCharlieClient } from '$lib/charlie/server';
 import type { Group, PaginationMeta } from '$lib/domain';
 
 export type { Group };

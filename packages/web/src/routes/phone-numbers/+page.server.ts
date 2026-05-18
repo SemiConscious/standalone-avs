@@ -14,9 +14,9 @@ import {
   CharlieOperations,
   projectCharliePhoneNumber,
   projectConnectionPagination,
-  tryGetCharlieClient,
   type CharlieConnection,
 } from '$lib/charlie';
+import { tryGetCharlieClient } from '$lib/charlie/server';
 import type { PhoneNumber, PaginationMeta } from '$lib/domain';
 
 export type { PhoneNumber };

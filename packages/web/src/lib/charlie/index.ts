@@ -20,7 +20,16 @@ export {
   type ServerCharlieClient,
 } from './client';
 
-export { tryGetCharlieClient, isDomainEnabled, type CharlieDomain } from './server';
+// Server-only helpers live in `./server.ts`. They are NOT re-exported
+// from this barrel because they import `$env/dynamic/private`, which
+// SvelteKit's bundler refuses to ship to the browser. Page-servers
+// (`+page.server.ts` / `+server.ts`) that need them must import
+// directly from `$lib/charlie/server`:
+//
+//   import { tryGetCharlieClient } from '$lib/charlie/server';
+//
+// Browser-safe consumers (Svelte components, browser-side stores) keep
+// importing from `$lib/charlie` as before.
 
 export {
   projectCharlieUser,

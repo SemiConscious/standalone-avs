@@ -16,9 +16,9 @@ import {
   CharlieOperations,
   projectCharlieCallLog,
   projectConnectionPagination,
-  tryGetCharlieClient,
   type CharlieConnection,
 } from '$lib/charlie';
+import { tryGetCharlieClient } from '$lib/charlie/server';
 import type { CallLog, PaginationMeta } from '$lib/domain';
 import { getSapienConfig } from '$lib/server/sapien';
 

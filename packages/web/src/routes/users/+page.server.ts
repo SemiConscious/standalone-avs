@@ -20,9 +20,9 @@ import {
   CharlieOperations,
   projectCharlieUser,
   projectConnectionPagination,
-  tryGetCharlieClient,
   type CharlieConnection,
 } from '$lib/charlie';
+import { tryGetCharlieClient } from '$lib/charlie/server';
 import type { User, PaginationMeta } from '$lib/domain';
 
 // Re-export User type for the page component
