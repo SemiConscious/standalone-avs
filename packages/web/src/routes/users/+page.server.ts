@@ -1,13 +1,28 @@
 /**
  * Users List Page Server
- * 
- * Refactored to use the platform-agnostic repository pattern.
- * No Salesforce-specific code in this file.
+ *
+ * Read path is Charlie-preferred (variant 7 data plane) when the
+ * SF→Charlie token-exchange chain is healthy + `CHARLIE_DATA_SOURCE`
+ * includes `users`. Falls back to the SF-SOQL repository on any
+ * Charlie-side failure so the page never goes blank because of a
+ * Charlie outage. See `lib/charlie/server.ts` for the gate.
+ *
+ * Mutations (form actions) still go to the SF-SOQL repository — Charlie
+ * exposes the SDL for `createUser`/`updateUser`/`deleteUser` but the
+ * resolvers throw `NOT_IMPLEMENTED` pending a Sapien-team conversation
+ * about PATCH semantics on `/organisation/{orgId}/user/{userId}`.
  */
 
 import type { PageServerLoad, Actions } from './$types';
 import { fail } from '@sveltejs/kit';
 import { createAdapterContext, getRepositories } from '$lib/adapters';
+import {
+  CharlieOperations,
+  projectCharlieUser,
+  projectConnectionPagination,
+  type CharlieConnection,
+} from '$lib/charlie';
+import { tryGetCharlieClient } from '$lib/charlie/server';
 import type { User, PaginationMeta } from '$lib/domain';
 
 // Re-export User type for the page component
@@ -73,13 +88,56 @@ export const load: PageServerLoad<UsersPageData> = async ({ locals, url }) => {
   }
 
   const isDemo = ctx.platform === 'demo';
+  const params = parseQueryParams(url);
+
+  // Charlie-preferred read path. Returns null when the SF→Charlie
+  // chain isn't healthy, the user wasn't opted in, or the env flag
+  // doesn't allow it for the `users` domain.
+  const charlie = tryGetCharlieClient(locals, 'users');
+  if (charlie) {
+    try {
+      // Build Charlie's UserFilterInput from the URL-driven page params.
+      // The /users UI exposes a status filter (active/inactive/suspended)
+      // that the SF SOQL fallback applies via SOQL `WHERE
+      // IsActive__c`-style clauses; on the Charlie path we forward it so
+      // the dispatcher's `SapienUserRepository.findAll` can filter the
+      // Sapien response in-memory (Sapien's `/user` endpoint has no
+      // server-side status filter).
+      const charlieFilter: Record<string, unknown> = {};
+      if (params.search != null && params.search.length > 0) {
+        charlieFilter.search = params.search;
+      }
+      if (params.filters?.status) {
+        // Charlie's UserStatusEnum is uppercase (ACTIVE/INACTIVE/SUSPENDED);
+        // the page-svelte's status select emits lowercase.
+        charlieFilter.status = params.filters.status.toUpperCase();
+      }
+      const data = await charlie.request<{
+        listUsers: CharlieConnection<Parameters<typeof projectCharlieUser>[0]>;
+      }>(CharlieOperations.ListUsersQuery, {
+        input: {
+          limit: params.pageSize,
+          ...(Object.keys(charlieFilter).length > 0 && { filter: charlieFilter }),
+        },
+      });
+      const conn = data.listUsers;
+      return {
+        users: conn.items.map(projectCharlieUser),
+        pagination: projectConnectionPagination(conn, params.page, params.pageSize),
+        isDemo,
+      };
+    } catch (err) {
+      console.warn(
+        '[charlie/users] data-plane query failed — falling back to SF SOQL:',
+        err instanceof Error ? err.message : String(err)
+      );
+      // Fall through to the SF path below.
+    }
+  }
 
   try {
     // Get repositories for the current platform
     const { users: userRepo } = getRepositories(ctx);
-
-    // Parse query parameters
-    const params = parseQueryParams(url);
 
     // Fetch users using the repository
     const result = await userRepo.findAll(params);

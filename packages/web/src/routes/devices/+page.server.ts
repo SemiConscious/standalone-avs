@@ -1,12 +1,23 @@
 /**
  * Devices List Page Server
- * 
- * Uses repository pattern for platform-agnostic data loading.
+ *
+ * Charlie-preferred read path (variant 7) when the SF→Charlie chain
+ * is healthy + `CHARLIE_DATA_SOURCE` includes `devices`. Falls back
+ * to the SF-SOQL repository on any Charlie-side failure. Mutations
+ * stay on SF — Charlie's device PATCH semantics aren't yet
+ * documented Sapien-side.
  */
 
 import type { PageServerLoad, Actions } from './$types';
 import { fail } from '@sveltejs/kit';
 import { createAdapterContext, getRepositories } from '$lib/adapters';
+import {
+  CharlieOperations,
+  projectCharlieDevice,
+  projectConnectionPagination,
+  type CharlieConnection,
+} from '$lib/charlie';
+import { tryGetCharlieClient } from '$lib/charlie/server';
 import type { Device, PaginationMeta } from '$lib/domain';
 
 export type { Device };
@@ -54,9 +65,37 @@ export const load: PageServerLoad<DevicesPageData> = async ({ locals, url }) => 
     };
   }
 
+  const params = parseQueryParams(url);
+
+  // Charlie-preferred read path. See `/users/+page.server.ts` for the
+  // canonical comment on what this gate evaluates.
+  const charlie = tryGetCharlieClient(locals, 'devices');
+  if (charlie) {
+    try {
+      const data = await charlie.request<{
+        listDevices: CharlieConnection<Parameters<typeof projectCharlieDevice>[0]>;
+      }>(CharlieOperations.ListDevicesQuery, {
+        input: {
+          limit: params.pageSize,
+          ...(params.search != null && { filter: { search: params.search } }),
+        },
+      });
+      const conn = data.listDevices;
+      return {
+        devices: conn.items.map(projectCharlieDevice),
+        pagination: projectConnectionPagination(conn, params.page, params.pageSize),
+        isDemo: ctx.platform === 'demo',
+      };
+    } catch (err) {
+      console.warn(
+        '[charlie/devices] data-plane query failed — falling back to SF SOQL:',
+        err instanceof Error ? err.message : String(err)
+      );
+    }
+  }
+
   try {
     const { devices: deviceRepo } = getRepositories(ctx);
-    const params = parseQueryParams(url);
     const result = await deviceRepo.findAll(params);
 
     return {
@@ -108,7 +147,9 @@ export const actions: Actions = {
 
       return { success: true, message: 'Device deleted successfully' };
     } catch (error) {
-      return fail(500, { error: error instanceof Error ? error.message : 'Failed to delete device' });
+      return fail(500, {
+        error: error instanceof Error ? error.message : 'Failed to delete device',
+      });
     }
   },
 };
