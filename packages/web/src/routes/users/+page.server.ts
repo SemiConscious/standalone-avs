@@ -96,17 +96,28 @@ export const load: PageServerLoad<UsersPageData> = async ({ locals, url }) => {
   const charlie = tryGetCharlieClient(locals, 'users');
   if (charlie) {
     try {
+      // Build Charlie's UserFilterInput from the URL-driven page params.
+      // The /users UI exposes a status filter (active/inactive/suspended)
+      // that the SF SOQL fallback applies via SOQL `WHERE
+      // IsActive__c`-style clauses; on the Charlie path we forward it so
+      // the dispatcher's `SapienUserRepository.findAll` can filter the
+      // Sapien response in-memory (Sapien's `/user` endpoint has no
+      // server-side status filter).
+      const charlieFilter: Record<string, unknown> = {};
+      if (params.search != null && params.search.length > 0) {
+        charlieFilter.search = params.search;
+      }
+      if (params.filters?.status) {
+        // Charlie's UserStatusEnum is uppercase (ACTIVE/INACTIVE/SUSPENDED);
+        // the page-svelte's status select emits lowercase.
+        charlieFilter.status = params.filters.status.toUpperCase();
+      }
       const data = await charlie.request<{
         listUsers: CharlieConnection<Parameters<typeof projectCharlieUser>[0]>;
       }>(CharlieOperations.ListUsersQuery, {
         input: {
           limit: params.pageSize,
-          // The SvelteKit page tier sends page+pageSize; Charlie's
-          // pagination is token-based. For the first cut we paginate
-          // page 1 only — the existing UI doesn't pass through Charlie's
-          // continuationToken yet. Adding token-based UI pagination is
-          // a follow-up.
-          ...(params.search != null && { filter: { search: params.search } }),
+          ...(Object.keys(charlieFilter).length > 0 && { filter: charlieFilter }),
         },
       });
       const conn = data.listUsers;
