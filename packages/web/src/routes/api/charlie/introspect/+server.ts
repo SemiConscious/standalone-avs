@@ -154,10 +154,19 @@ export const POST: RequestHandler = async ({ request, url, fetch }) => {
   // Charlie expects a scope string in the response. For Phase 1.1 we grant
   // the full scope set the partner client is configured for — Charlie will
   // intersect this with the requested scopes upstream.
-  const grantedScopes = (env.CHARLIE_INTROSPECTION_GRANTED_SCOPES ??
+  //
+  // Note: Charlie's per-resolver `@scopes` directives are the authoritative
+  // gate. If you add a new resolver gated on a scope not in this list,
+  // also update `charlie-dev-partner-clients[clientId=pc_…].allowedScopes`
+  // and verify the user's token-exchange picks up the new scope (current
+  // sessions are cached by jti — log out + back in to refresh).
+  const grantedScopes = (
+    env.CHARLIE_INTROSPECTION_GRANTED_SCOPES ??
     'users:read users:admin groups:read groups:admin devices:read devices:admin ' +
-    'phoneNumbers:read phoneNumbers:admin routingPolicies:read routingPolicies:admin ' +
-    'calls:read calls:control calls:supervise agent:read agent:control media:read').trim();
+      'phoneNumbers:read phoneNumbers:admin routingPolicies:read routingPolicies:admin ' +
+      'calls:read calls:control calls:supervise callLogs:read ' +
+      'agent:read agent:control media:read recordings:read recordings:control'
+  ).trim();
 
   // ---------------------------------------------------------------------------
   // Variant 7 — mint a Sapien access token for the caller's org and ship
