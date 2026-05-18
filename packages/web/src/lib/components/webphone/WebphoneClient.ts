@@ -37,12 +37,29 @@ export type WebphoneClientEvent =
 
 type Listener = (event: WebphoneClientEvent) => void;
 
+/**
+ * Recognise the dispatcher's placeholder SIP password (a 32-char hex
+ * UUID minus its hyphens) so we can surface a "no webphone provisioned"
+ * hint instead of an opaque REGISTRATION_FAILED. The dispatcher emits
+ * this shape when:
+ *   - the dispatcher isn't configured for Sapien (CHARLIE_ADAPTER ≠
+ *     'sapien' or CHARLIE_SESSIONS_TABLE unset),
+ *   - the session JWT lacks `jti`, or
+ *   - the user has no webphone-typed device on file in Sapien yet.
+ * In all three cases REGISTER will 403 against webphoned, and the
+ * actionable fix is "provision a webphone for this user", not
+ * "investigate the SIP stack".
+ */
+const PLACEHOLDER_PASSWORD_RE = /^[0-9a-f]{32}$/;
+
 export class WebphoneClient {
   private ua: JsSIP.UA | null = null;
   private listeners = new Set<Listener>();
   private sessionsBySipId = new Map<string, RTCSession>();
   private currentWsUrl: string | null = null;
   private currentSipUri: string | null = null;
+  private currentIceServers: readonly RTCIceServer[] = [];
+  private currentLooksLikePlaceholder = false;
 
   /**
    * Build (but don't start) the underlying JsSIP UA from a
@@ -60,6 +77,23 @@ export class WebphoneClient {
       this.ua = null;
     }
     const wsUrl = overrideWsUrl ?? transport.wsUrl;
+    const looksLikePlaceholder = PLACEHOLDER_PASSWORD_RE.test(transport.sipPassword);
+
+    // Phase 1 diagnostic log: enough to verify a deploy without leaking
+    // the SIP password. The wsUrl + sipUri + iceServer count tell an
+    // operator the resolver returned the right shape; the
+    // `looksLikePlaceholder` flag distinguishes "Charlie's transport
+    // is correct, REGISTER will 403 because there's no webphone
+    // provisioned" from "the SIP stack itself is broken".
+    console.info('[webphone] mediaTransport resolved', {
+      wsUrl,
+      sipUri: transport.sipUri,
+      sipPasswordLength: transport.sipPassword.length,
+      looksLikePlaceholder,
+      iceServerCount: transport.iceServers.length,
+      overrideWsUrl: overrideWsUrl ?? null,
+    });
+
     const socket = new JsSIP.WebSocketInterface(wsUrl);
     const ua = new JsSIP.UA({
       uri: transport.sipUri,
@@ -82,11 +116,16 @@ export class WebphoneClient {
     });
     ua.on('registrationFailed', (e) => {
       const cause = typeof e.cause === 'string' ? e.cause : 'UNKNOWN';
-      setWebphoneStatus({ registration: 'REGISTRATION_FAILED', lastError: cause });
       const reasonPhrase =
         'response' in e && e.response && typeof e.response === 'object'
           ? ((e.response as { reason_phrase?: string }).reason_phrase ?? '')
           : '';
+      const lastError = looksLikePlaceholder
+        ? `${cause} (no webphone provisioned for this user — ask your Salesforce admin to provision a webphone via the AVS package)`
+        : reasonPhrase
+          ? `${cause}: ${reasonPhrase}`
+          : cause;
+      setWebphoneStatus({ registration: 'REGISTRATION_FAILED', lastError });
       this.dispatch({ type: 'register-failed', reason: reasonPhrase, cause });
     });
     ua.on('newRTCSession', (e: RTCSessionEvent) => {
@@ -116,6 +155,12 @@ export class WebphoneClient {
     this.ua = ua;
     this.currentWsUrl = wsUrl;
     this.currentSipUri = transport.sipUri;
+    this.currentIceServers = transport.iceServers.map((s) => ({
+      urls: [...s.urls],
+      ...(s.username !== undefined && { username: s.username }),
+      ...(s.credential !== undefined && { credential: s.credential }),
+    }));
+    this.currentLooksLikePlaceholder = looksLikePlaceholder;
     setWebphoneStatus({
       registration: 'BOOTSTRAPPING',
       sipUri: transport.sipUri,
@@ -152,7 +197,7 @@ export class WebphoneClient {
     if (!session) return;
     session.answer({
       mediaConstraints: { audio: true, video: false },
-      pcConfig: { iceServers: [] }, // ICE servers come from Charlie via media transport
+      pcConfig: { iceServers: [...this.currentIceServers] },
     });
   }
 
@@ -217,5 +262,16 @@ export class WebphoneClient {
 
   getCurrentSipUri(): string | null {
     return this.currentSipUri;
+  }
+
+  /**
+   * Whether the SIP password Charlie returned looks like the
+   * dispatcher's placeholder (32 hex chars, no Sapien-issued
+   * credential). True implies "no webphone provisioned for this user
+   * in Sapien"; the `register-failed` event will fire once REGISTER
+   * round-trips against `webphoned`.
+   */
+  isCurrentCredentialPlaceholder(): boolean {
+    return this.currentLooksLikePlaceholder;
   }
 }
