@@ -37,7 +37,11 @@ import { error, type RequestHandler } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { createHash } from 'node:crypto';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
-import { getSapienAccessTokenWithExpiry } from '$lib/server/gatekeeper';
+import {
+  fetchSapienUserIdentity,
+  getSapienAccessTokenWithExpiry,
+  getSapienHost,
+} from '$lib/server/gatekeeper';
 
 const SF_USERINFO_DEFAULT = 'https://login.salesforce.com/services/oauth2/userinfo';
 
@@ -139,18 +143,6 @@ export const POST: RequestHandler = async ({ request, url, fetch }) => {
     return inactiveResponse('SF_USERINFO_MISSING_FIELDS');
   }
 
-  // ---------------------------------------------------------------------------
-  // Map SF identity -> Natterbox numeric ids. Phase 1.1 stub.
-  // ---------------------------------------------------------------------------
-  const orgId = numericEnv('CHARLIE_INTROSPECTION_NBX_ORG_ID');
-  const userId = numericEnv('CHARLIE_INTROSPECTION_NBX_USER_ID');
-  if (orgId === null || userId === null) {
-    throw error(503, {
-      message:
-        'CHARLIE_INTROSPECTION_NBX_ORG_ID / _NBX_USER_ID not configured; cannot map SF identity to Natterbox identity in Phase 1.1.',
-    });
-  }
-
   // Charlie expects a scope string in the response. For Phase 1.1 we grant
   // the full scope set the partner client is configured for — Charlie will
   // intersect this with the requested scopes upstream.
@@ -163,9 +155,9 @@ export const POST: RequestHandler = async ({ request, url, fetch }) => {
   const grantedScopes = (
     env.CHARLIE_INTROSPECTION_GRANTED_SCOPES ??
     'users:read users:admin groups:read groups:admin devices:read devices:admin ' +
-      'phoneNumbers:read phoneNumbers:admin routingPolicies:read routingPolicies:admin ' +
-      'calls:read calls:control calls:supervise callLogs:read ' +
-      'agent:read agent:control media:read recordings:read recordings:control'
+    'phoneNumbers:read phoneNumbers:admin routingPolicies:read routingPolicies:admin ' +
+    'calls:read calls:control calls:supervise callLogs:read ' +
+    'agent:read agent:control media:read recordings:read recordings:control'
   ).trim();
 
   // ---------------------------------------------------------------------------
@@ -183,12 +175,42 @@ export const POST: RequestHandler = async ({ request, url, fetch }) => {
   // ---------------------------------------------------------------------------
   let sapienAccessToken: string | undefined;
   let sapienAccessTokenExpiresAt: number | undefined;
-  const instanceUrl = env.CHARLIE_INTROSPECTION_SF_INSTANCE_URL ?? userinfo.urls?.rest?.split('/services/')[0];
+  let sapienResolvedOrgId: number | undefined;
+  let sapienResolvedUserId: number | undefined;
+  const instanceUrl =
+    env.CHARLIE_INTROSPECTION_SF_INSTANCE_URL ?? userinfo.urls?.rest?.split('/services/')[0];
   if (instanceUrl) {
     try {
       const sapien = await getSapienAccessTokenWithExpiry(instanceUrl, subjectToken);
       sapienAccessToken = sapien.accessToken;
       sapienAccessTokenExpiresAt = Math.floor(sapien.expiresAt.getTime() / 1000);
+
+      // Resolve the bearer's REAL Sapien identity. The hardcoded
+      // CHARLIE_INTROSPECTION_NBX_ORG_ID / _USER_ID env vars were a Phase 1.1
+      // stub and produced a stable bug for variant-7 callers: Charlie's
+      // Gatekeeper-bound URL became `/token/sapien/organisation/<stub>/user/<stub>`,
+      // but the Gatekeeper Lambda authoriser builds an Allow policy from the
+      // bearer's actual `organisationId` (`<myorgid>` placeholder in
+      // `platform-auth-scopes/gatekeeper.yml`). Stub != bearer org → policy
+      // doesn't match the URL → API Gateway 403 with the misleading
+      // "execute-api:Invoke / explicit deny" wording. The fix is to discover
+      // the bearer's identity here and ship it to Charlie unchanged; the AVS
+      // Apex code (`AuthGatekeeper.cls`) does the equivalent client-side
+      // lookup against `nbavs__User__c` keyed by SF user id.
+      const sapienHost = getSapienHost();
+      if (sapienHost) {
+        try {
+          const identity = await fetchSapienUserIdentity(sapienHost, sapien.accessToken);
+          sapienResolvedOrgId = identity.orgId;
+          sapienResolvedUserId = identity.userId;
+        } catch (identityErr) {
+          console.warn(
+            '[charlie/introspect] Sapien /user/me lookup failed; falling back to ' +
+              `CHARLIE_INTROSPECTION_NBX_ORG_ID/_USER_ID env stubs. Error: ` +
+              `${identityErr instanceof Error ? identityErr.message : String(identityErr)}`,
+          );
+        }
+      }
     } catch (err) {
       // Don't fail the whole introspection — Charlie copes with
       // missing-token sessions. Just log so an operator can investigate
@@ -199,6 +221,22 @@ export const POST: RequestHandler = async ({ request, url, fetch }) => {
           `Error: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Map SF identity -> Natterbox numeric ids. Prefer the Sapien-resolved
+  // identity (the canonical one for Sapien REST + Gatekeeper); fall back to
+  // env-var stubs only when the Sapien path is unavailable, so local-dev /
+  // demo environments continue to function with the original stubs.
+  // ---------------------------------------------------------------------------
+  const orgId = sapienResolvedOrgId ?? numericEnv('CHARLIE_INTROSPECTION_NBX_ORG_ID');
+  const userId = sapienResolvedUserId ?? numericEnv('CHARLIE_INTROSPECTION_NBX_USER_ID');
+  if (orgId === null || userId === null || orgId === undefined || userId === undefined) {
+    throw error(503, {
+      message:
+        'Could not resolve a Natterbox identity for this user. Sapien /user/me failed and ' +
+        'CHARLIE_INTROSPECTION_NBX_ORG_ID / _NBX_USER_ID fallbacks are not configured.',
+    });
   }
 
   // The `x_nbox` block carries Natterbox identity + the Sapien access

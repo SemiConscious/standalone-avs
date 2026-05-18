@@ -549,6 +549,91 @@ export function getSapienHost(): string | null {
 }
 
 /**
+ * Identity Sapien returns for the bearer of a Sapien access token.
+ *
+ * `id` and `organisationId` are Natterbox-native numeric ids. They are the
+ * canonical identity for any Sapien-fronted API + the Gatekeeper token-mint
+ * URL must use them (`/token/sapien/organisation/<orgId>/user/<userId>`),
+ * because the Gatekeeper Lambda authoriser builds its Allow policy off the
+ * bearer's `<myorgid>` placeholder which expands to this exact `organisationId`.
+ *
+ * Mismatching ids (e.g. hardcoded stubs) are silently denied by Gatekeeper as
+ * a 403 with "no identity-based policy allows the execute-api:Invoke action"
+ * — the policy generator's Allow target simply doesn't match the URL.
+ */
+export interface SapienUserIdentity {
+  /** Natterbox organisation id (Sapien `organisationId`). */
+  orgId: number;
+  /** Natterbox user id (Sapien `id`). */
+  userId: number;
+  /** Sapien-recorded user name (the OAuth-client subject for AVS-API tokens). */
+  userName?: string;
+  /** True when the Sapien user record is enabled. */
+  enabled?: boolean;
+  /** Scopes Sapien grants this principal (e.g. `["avs:api"]`). */
+  scopes?: string[];
+}
+
+/**
+ * Resolve the bearer's Sapien identity by calling `${sapienHost}/user/me`.
+ *
+ * Mirrors `redmatter/go-gatekeeper-authoriser/pkg/sapien/user.go:GetAuthedUser`
+ * — the Gatekeeper Lambda authoriser does this same call to validate the
+ * bearer + resolve `<myorgid>` for its Allow policy. Resolving the identity
+ * partner-side gives Charlie the same view of the user, so the URLs Charlie's
+ * dispatcher constructs match the Allow policy exactly.
+ *
+ * Throws on non-2xx + on response shapes missing the required fields. The
+ * caller decides how to surface the failure — typically falling back to a
+ * configured stub identity for local-dev / mocked environments.
+ */
+export async function fetchSapienUserIdentity(
+  sapienHost: string,
+  sapienAccessToken: string,
+): Promise<SapienUserIdentity> {
+  const url = `${sapienHost.replace(/\/+$/, '')}/user/me`;
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${sapienAccessToken}`,
+      Accept: 'application/json',
+    },
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`Sapien /user/me returned ${response.status}: ${body.slice(0, 300)}`);
+  }
+  let parsed: {
+    id?: number;
+    organisationId?: number;
+    data?: {
+      userName?: string;
+      enabled?: boolean;
+      scopes?: string[];
+    };
+  };
+  try {
+    parsed = (await response.json()) as typeof parsed;
+  } catch (err) {
+    throw new Error(
+      `Sapien /user/me returned non-JSON body: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (typeof parsed.id !== 'number' || typeof parsed.organisationId !== 'number') {
+    throw new Error(
+      `Sapien /user/me missing id/organisationId: ${JSON.stringify(parsed).slice(0, 300)}`,
+    );
+  }
+  return {
+    orgId: parsed.organisationId,
+    userId: parsed.id,
+    ...(parsed.data?.userName !== undefined && { userName: parsed.data.userName }),
+    ...(parsed.data?.enabled !== undefined && { enabled: parsed.data.enabled }),
+    ...(parsed.data?.scopes !== undefined && { scopes: parsed.data.scopes }),
+  };
+}
+
+/**
  * Check if we can make Sapien API calls (have valid credentials cached or can fetch them)
  */
 export function canUseSapienApi(locals: App.Locals): boolean {
