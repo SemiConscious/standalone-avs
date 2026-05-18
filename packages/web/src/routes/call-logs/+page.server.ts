@@ -39,6 +39,14 @@ function parseQueryParams(url: URL) {
   const sortOrder = (url.searchParams.get('sortOrder') || 'desc') as 'asc' | 'desc';
   const search = url.searchParams.get('search') || undefined;
   const direction = url.searchParams.get('direction') || undefined;
+  // The /call-logs page UI emits these query parameters from the date
+  // pickers + the search box (see `+page.svelte`). The SF SOQL fallback
+  // applies them via `buildCallLogListQuery`; the Charlie path below
+  // forwards them onto the GraphQL `CallLogFilterInput`.
+  const fromDate = url.searchParams.get('fromDate') || undefined;
+  const toDate = url.searchParams.get('toDate') || undefined;
+  const userId = url.searchParams.get('userId') || undefined;
+  const phoneNumber = url.searchParams.get('phoneNumber') || undefined;
 
   return {
     page: Math.max(1, page),
@@ -46,9 +54,15 @@ function parseQueryParams(url: URL) {
     sortBy,
     sortOrder,
     search,
-    filters: direction
-      ? { direction: [direction] as ('inbound' | 'outbound' | 'internal')[] }
-      : undefined,
+    filters: {
+      ...(direction && {
+        direction: [direction] as ('inbound' | 'outbound' | 'internal')[],
+      }),
+      ...(fromDate && { fromDate }),
+      ...(toDate && { toDate }),
+      ...(userId && { userId }),
+      ...(phoneNumber && { phoneNumber }),
+    },
   };
 }
 
@@ -84,17 +98,29 @@ export const load: PageServerLoad<CallLogsPageData> = async ({ locals, url }) =>
   const charlie = tryGetCharlieClient(locals, 'call-logs');
   if (charlie) {
     try {
+      // Build the Charlie GraphQL filter from the page-server params.
+      // Field-by-field rather than a spread because Charlie's
+      // CallLogFilterInput uses fully-typed values (enum casing for
+      // direction, AWSDateTime for the date bounds) so we can't just
+      // forward `params.filters` verbatim.
+      const charlieFilter: Record<string, unknown> = {};
+      const directionFilter = params.filters.direction?.[0];
+      if (directionFilter) charlieFilter.direction = directionFilter.toUpperCase();
+      if (params.filters.fromDate) {
+        charlieFilter.fromDate = `${params.filters.fromDate}T00:00:00Z`;
+      }
+      if (params.filters.toDate) {
+        charlieFilter.toDate = `${params.filters.toDate}T23:59:59Z`;
+      }
+      if (params.filters.userId) charlieFilter.userId = params.filters.userId;
+      if (params.filters.phoneNumber) charlieFilter.phoneNumber = params.filters.phoneNumber;
+
       const data = await charlie.request<{
         listCallLogs: CharlieConnection<Parameters<typeof projectCharlieCallLog>[0]>;
       }>(CharlieOperations.ListCallLogsQuery, {
         input: {
           limit: params.pageSize,
-          // Charlie's CallLogFilterInput.direction is uppercase enum
-          // (INBOUND/OUTBOUND/INTERNAL); the page-server's
-          // params.filters.direction is lowercase. Map on the way in.
-          ...(params.filters?.direction?.[0] && {
-            filter: { direction: params.filters.direction[0].toUpperCase() },
-          }),
+          ...(Object.keys(charlieFilter).length > 0 && { filter: charlieFilter }),
         },
       });
       const conn = data.listCallLogs;
