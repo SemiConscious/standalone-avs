@@ -20,6 +20,20 @@ export {
   type ServerCharlieClient,
 } from './client';
 
+export { tryGetCharlieClient, isDomainEnabled, type CharlieDomain } from './server';
+
+export {
+  projectCharlieUser,
+  projectCharlieGroup,
+  projectCharlieGroupMember,
+  projectCharlieDevice,
+  projectCharliePhoneNumber,
+  projectCharlieRoutingPolicy,
+  projectCharlieCallLog,
+  projectConnectionPagination,
+  type CharlieConnection,
+} from './projections';
+
 export {
   configureRealtimeClient,
   subscribeStore,

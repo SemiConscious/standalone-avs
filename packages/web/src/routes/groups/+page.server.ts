@@ -1,12 +1,23 @@
 /**
  * Groups List Page Server
- * 
- * Uses repository pattern for platform-agnostic data loading.
+ *
+ * Charlie-preferred read path (variant 7) when the SF→Charlie chain
+ * is healthy + `CHARLIE_DATA_SOURCE` includes `groups`. Falls back to
+ * the SF-SOQL repository on any Charlie-side failure. Mutations stay
+ * on SF — Charlie group mutations are NOT_IMPLEMENTED pending the
+ * Sapien-team conversation about `/user-group/{id}/member` writes.
  */
 
 import type { PageServerLoad, Actions } from './$types';
 import { fail } from '@sveltejs/kit';
 import { createAdapterContext, getRepositories } from '$lib/adapters';
+import {
+  CharlieOperations,
+  projectCharlieGroup,
+  projectConnectionPagination,
+  tryGetCharlieClient,
+  type CharlieConnection,
+} from '$lib/charlie';
 import type { Group, PaginationMeta } from '$lib/domain';
 
 export type { Group };
@@ -54,9 +65,37 @@ export const load: PageServerLoad<GroupsPageData> = async ({ locals, url }) => {
     };
   }
 
+  const params = parseQueryParams(url);
+
+  // Charlie-preferred read path. See `/users/+page.server.ts` for the
+  // canonical comment on what this gate evaluates.
+  const charlie = tryGetCharlieClient(locals, 'groups');
+  if (charlie) {
+    try {
+      const data = await charlie.request<{
+        listGroups: CharlieConnection<Parameters<typeof projectCharlieGroup>[0]>;
+      }>(CharlieOperations.ListGroupsQuery, {
+        input: {
+          limit: params.pageSize,
+          ...(params.search != null && { filter: { search: params.search } }),
+        },
+      });
+      const conn = data.listGroups;
+      return {
+        groups: conn.items.map(projectCharlieGroup),
+        pagination: projectConnectionPagination(conn, params.page, params.pageSize),
+        isDemo: ctx.platform === 'demo',
+      };
+    } catch (err) {
+      console.warn(
+        '[charlie/groups] data-plane query failed — falling back to SF SOQL:',
+        err instanceof Error ? err.message : String(err)
+      );
+    }
+  }
+
   try {
     const { groups: groupRepo } = getRepositories(ctx);
-    const params = parseQueryParams(url);
     const result = await groupRepo.findAll(params);
 
     return {
@@ -108,7 +147,9 @@ export const actions: Actions = {
 
       return { success: true, message: 'Group deleted successfully' };
     } catch (error) {
-      return fail(500, { error: error instanceof Error ? error.message : 'Failed to delete group' });
+      return fail(500, {
+        error: error instanceof Error ? error.message : 'Failed to delete group',
+      });
     }
   },
 };

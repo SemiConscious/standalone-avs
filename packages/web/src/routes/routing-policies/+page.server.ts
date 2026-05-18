@@ -1,12 +1,26 @@
 /**
  * Routing Policies Page Server
- * 
- * Uses repository pattern for platform-agnostic data loading.
+ *
+ * Charlie-preferred read path (variant 7) when the SF→Charlie chain
+ * is healthy + `CHARLIE_DATA_SOURCE` includes `routing-policies`.
+ * Falls back to the SF-SOQL repository on any Charlie-side failure.
+ *
+ * Charlie's routing-policy resolvers map to Sapien's `/dial-plan/policy-
+ * destination-number` family. Mutation paths exist on Charlie too but
+ * the visual-flow body shape is the standalone-avs editor's
+ * React-Flow render model — that part stays SF-side.
  */
 
 import type { PageServerLoad, Actions } from './$types';
 import { fail } from '@sveltejs/kit';
 import { createAdapterContext, getRepositories } from '$lib/adapters';
+import {
+  CharlieOperations,
+  projectCharlieRoutingPolicy,
+  projectConnectionPagination,
+  tryGetCharlieClient,
+  type CharlieConnection,
+} from '$lib/charlie';
 import type { RoutingPolicy, PaginationMeta } from '$lib/domain';
 
 export type { RoutingPolicy };
@@ -54,9 +68,37 @@ export const load: PageServerLoad<RoutingPoliciesPageData> = async ({ locals, ur
     };
   }
 
+  const params = parseQueryParams(url);
+
+  // Charlie-preferred read path. See `/users/+page.server.ts` for the
+  // canonical comment on what this gate evaluates.
+  const charlie = tryGetCharlieClient(locals, 'routing-policies');
+  if (charlie) {
+    try {
+      const data = await charlie.request<{
+        listRoutingPolicies: CharlieConnection<Parameters<typeof projectCharlieRoutingPolicy>[0]>;
+      }>(CharlieOperations.ListRoutingPoliciesQuery, {
+        input: {
+          limit: params.pageSize,
+          ...(params.search != null && { filter: { search: params.search } }),
+        },
+      });
+      const conn = data.listRoutingPolicies;
+      return {
+        policies: conn.items.map(projectCharlieRoutingPolicy),
+        pagination: projectConnectionPagination(conn, params.page, params.pageSize),
+        isDemo: ctx.platform === 'demo',
+      };
+    } catch (err) {
+      console.warn(
+        '[charlie/routing-policies] data-plane query failed — falling back to SF SOQL:',
+        err instanceof Error ? err.message : String(err)
+      );
+    }
+  }
+
   try {
     const { routingPolicies: policyRepo } = getRepositories(ctx);
-    const params = parseQueryParams(url);
     const result = await policyRepo.findAll(params);
 
     return {
@@ -108,7 +150,9 @@ export const actions: Actions = {
 
       return { success: true, message: 'Policy deleted successfully' };
     } catch (error) {
-      return fail(500, { error: error instanceof Error ? error.message : 'Failed to delete policy' });
+      return fail(500, {
+        error: error instanceof Error ? error.message : 'Failed to delete policy',
+      });
     }
   },
 };

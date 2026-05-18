@@ -59,7 +59,7 @@ export async function exchangeSalesforceAccessTokenForCharlieJwt(
   tokenExchangeBase: string | null,
   clientId: string | null,
   fetchImpl: typeof fetch = fetch,
-  requestedScopes?: readonly string[],
+  requestedScopes?: readonly string[]
 ): Promise<TokenExchangeResult> {
   if (!tokenExchangeBase) {
     return {
@@ -115,7 +115,7 @@ export async function exchangeSalesforceAccessTokenForCharlieJwt(
       message:
         'Charlie /token/exchange returned 501 — no provider registered for ' +
         `subject_token_type=${CALLBACK_SUBJECT_TOKEN_TYPE}. Check that the ` +
-        'CallbackIntrospectionProvider is wired in Charlie\'s tokenExchange Lambda.',
+        "CallbackIntrospectionProvider is wired in Charlie's tokenExchange Lambda.",
       httpStatus: 501,
     };
   }
@@ -147,8 +147,9 @@ export async function exchangeSalesforceAccessTokenForCharlieJwt(
     return {
       ok: false,
       reason: 'NETWORK_ERROR',
-      message: `Failed to parse Charlie /token/exchange JSON response: ${err instanceof Error ? err.message : String(err)
-        }`,
+      message: `Failed to parse Charlie /token/exchange JSON response: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
       httpStatus: response.status,
     };
   }
@@ -192,14 +193,14 @@ export function exchangeForBrowserJwt(
   salesforceAccessToken: string,
   tokenExchangeBase: string | null,
   clientId: string | null,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = fetch
 ): Promise<TokenExchangeResult> {
   return exchangeSalesforceAccessTokenForCharlieJwt(
     salesforceAccessToken,
     tokenExchangeBase,
     clientId,
     fetchImpl,
-    DEFAULT_BROWSER_SCOPES,
+    DEFAULT_BROWSER_SCOPES
   );
 }
 

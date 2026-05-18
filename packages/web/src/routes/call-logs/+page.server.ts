@@ -1,11 +1,24 @@
 /**
  * Call Logs Page Server
- * 
- * Uses repository pattern for platform-agnostic data loading.
+ *
+ * Charlie-preferred read path (variant 7) when the SF→Charlie chain
+ * is healthy + `CHARLIE_DATA_SOURCE` includes `call-logs`. Falls
+ * back to the SF-SOQL repository on any Charlie-side failure.
+ *
+ * Charlie's `Query.listCallLogs` was the proof-of-life resolver in
+ * Phase B.2 — backed by Sapien's `/log/call?user-id=…&_limit=…` via
+ * `SapienCallLogRepository`.
  */
 
 import type { PageServerLoad } from './$types';
 import { createAdapterContext, getRepositories } from '$lib/adapters';
+import {
+  CharlieOperations,
+  projectCharlieCallLog,
+  projectConnectionPagination,
+  tryGetCharlieClient,
+  type CharlieConnection,
+} from '$lib/charlie';
 import type { CallLog, PaginationMeta } from '$lib/domain';
 import { getSapienConfig } from '$lib/server/sapien';
 
@@ -33,7 +46,9 @@ function parseQueryParams(url: URL) {
     sortBy,
     sortOrder,
     search,
-    filters: direction ? { direction: [direction] as ('inbound' | 'outbound' | 'internal')[] } : undefined,
+    filters: direction
+      ? { direction: [direction] as ('inbound' | 'outbound' | 'internal')[] }
+      : undefined,
   };
 }
 
@@ -62,9 +77,43 @@ export const load: PageServerLoad<CallLogsPageData> = async ({ locals, url }) =>
     };
   }
 
+  const params = parseQueryParams(url);
+
+  // Charlie-preferred read path. See `/users/+page.server.ts` for the
+  // canonical comment on what this gate evaluates.
+  const charlie = tryGetCharlieClient(locals, 'call-logs');
+  if (charlie) {
+    try {
+      const data = await charlie.request<{
+        listCallLogs: CharlieConnection<Parameters<typeof projectCharlieCallLog>[0]>;
+      }>(CharlieOperations.ListCallLogsQuery, {
+        input: {
+          limit: params.pageSize,
+          // Charlie's CallLogFilterInput.direction is uppercase enum
+          // (INBOUND/OUTBOUND/INTERNAL); the page-server's
+          // params.filters.direction is lowercase. Map on the way in.
+          ...(params.filters?.direction?.[0] && {
+            filter: { direction: params.filters.direction[0].toUpperCase() },
+          }),
+        },
+      });
+      const conn = data.listCallLogs;
+      return {
+        callLogs: conn.items.map(projectCharlieCallLog),
+        pagination: projectConnectionPagination(conn, params.page, params.pageSize),
+        isDemo: ctx.platform === 'demo',
+        canPlayRecordings,
+      };
+    } catch (err) {
+      console.warn(
+        '[charlie/call-logs] data-plane query failed — falling back to SF SOQL:',
+        err instanceof Error ? err.message : String(err)
+      );
+    }
+  }
+
   try {
     const { callLogs: callLogRepo } = getRepositories(ctx);
-    const params = parseQueryParams(url);
     const result = await callLogRepo.findAll(params);
 
     return {
