@@ -20,6 +20,20 @@ export interface CallLeg {
   id: string;
   /** Always set — generated client-side at dial / on inbound. */
   correlationId: string;
+  /**
+   * JsSIP RTCSession id. Set as soon as the local SIP UA registers a
+   * session for this leg (outbound: at dial(), inbound: on the
+   * `inbound-session` event). Null until the SIP layer knows about
+   * the leg — typically only briefly during the very first DIALING
+   * tick before JsSIP returns a session id.
+   *
+   * The local SIP layer is the source of truth for mid-call control
+   * (hangup / hold / mute / DTMF). Charlie's `CallEvent` subscription
+   * still drives state-machine transitions for cross-device sync,
+   * but per-call buttons in this UI talk to the SIP UA directly via
+   * this id.
+   */
+  sipSessionId: string | null;
   state: CallLegState;
   direction: CallDirection | null;
   from: string | null;
