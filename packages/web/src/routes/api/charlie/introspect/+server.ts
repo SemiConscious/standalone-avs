@@ -276,23 +276,23 @@ export const POST: RequestHandler = async ({ request, url, fetch }) => {
     });
   }
 
-  // The `x_nbox` block carries Natterbox identity + the Sapien access
-  // token from variant 7. We deliberately do NOT include partner-CRM
-  // credentials (SF access tokens, refresh tokens, instance URLs) —
-  // Charlie is partner-CRM-agnostic on its data plane and has no
-  // consumer for them. A previous revision sent a `crmContext` block
-  // carrying the SF access token + instance URL; that pipeline (the
-  // dispatcher-side `crm` claim, `CrmContextCipher`,
-  // `@charlie/adapters-salesforce`) has been retired. Defence in depth:
-  // even if Charlie were compromised, it would not have the SF token to
-  // lift.
+  // The `x_nbox` block carries:
   //
-  // The Sapien access token IS shipped — but Sapien is the
-  // Natterbox-shared platform that every Charlie consumer ultimately
-  // reaches, not a partner-CRM credential. The token is org-scoped
-  // (one Natterbox org per `nbavs__API_v1__c` credential set), short-
-  // lived (Sapien's expires_in), and stored Charlie-side keyed by JWT
-  // jti so the JWT body never carries it.
+  //   1. Natterbox identity (organizationId, userId, sfUserId, sfOrgId).
+  //   2. The Sapien access token from variant 7. Sapien is the
+  //      Natterbox-shared platform every Charlie consumer eventually
+  //      hits — token is org-scoped, short-lived, stored Charlie-side
+  //      keyed by jti.
+  //   3. `partner_session` — the user's SF OAuth access token + their
+  //      SF instance URL, which Charlie will round-trip back to us at
+  //      `/api/charlie/callback` time so we can act as the same OAuth
+  //      user when we need to do per-resource SOQL (e.g. fetching the
+  //      webphone SIP password from `nbavs__Device__c`). This is NOT a
+  //      service-account credential — it's exactly the user-scoped
+  //      token the user already authenticated with at this app, no
+  //      broader, no longer-lived. Charlie persists it on the per-jti
+  //      session row alongside the Sapien token. See
+  //      `charlie-api/docs/PARTNER_CALLBACK.md` § "partner_session".
   const xNbox: Record<string, unknown> = {
     organizationId: orgId,
     userId: userId,
@@ -302,6 +302,12 @@ export const POST: RequestHandler = async ({ request, url, fetch }) => {
   if (sapienAccessToken && sapienAccessTokenExpiresAt) {
     xNbox['sapienAccessToken'] = sapienAccessToken;
     xNbox['sapienAccessTokenExpiresAt'] = sapienAccessTokenExpiresAt;
+  }
+  if (instanceUrl) {
+    xNbox['partner_session'] = {
+      accessToken: subjectToken,
+      instanceUrl,
+    };
   }
 
   return new Response(

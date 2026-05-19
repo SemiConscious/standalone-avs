@@ -5,8 +5,10 @@
  * when a resolver needs partner-side data on demand. Same security
  * envelope as `/api/charlie/introspect` (Charlie-signed JWT,
  * `body_sha256` binding to the request body, audience pinned to our
- * origin) but a different request shape: a `reason` discriminator
- * plus a `context` blob.
+ * origin) but a different request shape: a `reason` discriminator,
+ * a `context` blob, and an opaque `partner_session` bag carrying
+ * exactly the user-scoped credentials we minted at introspection
+ * time.
  *
  * Wider design: `charlie-api/docs/PARTNER_CALLBACK.md`.
  *
@@ -18,16 +20,25 @@
  *
  *   {
  *     "reason": "fetch_sip_credentials",
- *     "context": { "organizationId": 4090, "userId": 119010, "correlationId": "..." }
+ *     "context": { "organizationId": 4090, "userId": 119010, "correlationId": "..." },
+ *     "partner_session": { "accessToken": "00D...", "instanceUrl": "https://*.my.salesforce.com" }
  *   }
+ *
+ * `partner_session` is the user's SF OAuth access token + instance
+ * URL — the same token they authenticated with at login. We use it
+ * to authenticate the SOQL we issue against `nbavs__Device__c`.
+ * Crucially this means:
+ *
+ *   - We never hold a service-account credential. The token is
+ *     user-scoped, no broader, no longer-lived than the user's own
+ *     SF session.
+ *   - When the user logs out / the SF token is revoked, the next
+ *     callback fails fast with `INVALID_SESSION_ID` and the user is
+ *     prompted to re-auth. No silent drift.
  *
  * ## Response
  *
- *   {
- *     "active": true,
- *     "data": { ...reason-specific shape... },
- *     "ttl": 300
- *   }
+ *   { "active": true, "data": { ...reason-specific shape... }, "ttl": 300 }
  *
  * `active: false` (with optional `reason`) means "Charlie's request is
  * syntactically valid but we have nothing to return for this user/
@@ -41,30 +52,7 @@
  *     `nbavs__Password__c`). Returns
  *     `{ username, password, domain, host, ext? }`.
  *
- * Adding a new reason is a one-case extension on the `switch` below —
- * no contract changes elsewhere.
- *
- * ## Authentication to Salesforce
- *
- * Charlie does NOT ship the user's SF token to this endpoint — by
- * design, the partner-callback `context` carries only Natterbox-side
- * identity. So we authenticate to Salesforce using a service-account
- * username + password grant against a pre-configured Connected App.
- * Credentials live in Vercel env vars:
- *
- *   - `CHARLIE_CALLBACK_SF_INSTANCE_URL`
- *   - `CHARLIE_CALLBACK_SF_CLIENT_ID`
- *   - `CHARLIE_CALLBACK_SF_CLIENT_SECRET`
- *   - `CHARLIE_CALLBACK_SF_USERNAME`
- *   - `CHARLIE_CALLBACK_SF_PASSWORD` — concatenated `password+securityToken`
- *
- * Phase 2 TODO: swap to JWT Bearer flow (Connected App with private key)
- * so we don't need to store a password. Tracked in
- * `docs/PARTNER_CALLBACK.md` § "Out of scope".
- *
- * Tokens are cached in-process for the SF session lifetime; the
- * Vercel runtime keeps the warm function alive across requests for
- * ~minutes which is enough for the webphone-bootstrap path's locality.
+ * Adding a new reason is a one-case extension on the `switch` below.
  */
 
 import { error, type RequestHandler } from '@sveltejs/kit';
@@ -86,11 +74,10 @@ function getJwks(jwksUri: string): ReturnType<typeof createRemoteJWKSet> {
   return cachedJwks;
 }
 
-// Cached service-account SF session. Mints fresh on cold start +
-// expiry. Vercel keeps warm functions alive long enough for this to
-// usefully amortise across requests.
-let cachedSfSession: { instanceUrl: string; accessToken: string; expiresAt: number } | null = null;
-const SF_SESSION_REFRESH_BEFORE_EXPIRY_MS = 5 * 60_000;
+interface PartnerSession {
+  accessToken: string;
+  instanceUrl: string;
+}
 
 export const POST: RequestHandler = async ({ request, url }) => {
   const expectedIssuer = env.CHARLIE_INTROSPECTION_EXPECTED_ISSUER;
@@ -141,9 +128,9 @@ export const POST: RequestHandler = async ({ request, url }) => {
   // ---------------------------------------------------------------------------
   // Parse the request body.
   // ---------------------------------------------------------------------------
-  let parsed: { reason?: unknown; context?: unknown };
+  let parsed: { reason?: unknown; context?: unknown; partner_session?: unknown };
   try {
-    parsed = JSON.parse(bodyText) as { reason?: unknown; context?: unknown };
+    parsed = JSON.parse(bodyText) as typeof parsed;
   } catch {
     throw error(400, { message: 'Request body is not valid JSON.' });
   }
@@ -154,6 +141,7 @@ export const POST: RequestHandler = async ({ request, url }) => {
     throw error(400, { message: 'Request body is missing the `context` object.' });
   }
   const context = parsed.context as Record<string, unknown>;
+  const partnerSession = parsePartnerSession(parsed.partner_session);
 
   // ---------------------------------------------------------------------------
   // Reason-code dispatch.
@@ -163,14 +151,13 @@ export const POST: RequestHandler = async ({ request, url }) => {
   //   - { active: false, reason } when the resource doesn't exist for
   //     this user/reason (Charlie treats this as null and falls back).
   //
-  // Adding a new reason: add a case here that resolves whatever the
-  // partner-side data source is. Charlie's GraphQL resolver knows the
-  // shape it expects in `data`; document the contract in
+  // Adding a new reason: add a case here. Charlie's GraphQL resolver
+  // knows the shape it expects in `data`; document the contract in
   // STANDALONE_AVS_INTEGRATION.md § "Partner callback reasons".
   // ---------------------------------------------------------------------------
   switch (parsed.reason) {
     case 'fetch_sip_credentials':
-      return handleFetchSipCredentials(context);
+      return handleFetchSipCredentials(context, partnerSession);
     default:
       return Response.json(
         { active: false, reason: 'UNKNOWN_REASON' },
@@ -183,7 +170,10 @@ export const POST: RequestHandler = async ({ request, url }) => {
 // Reason: fetch_sip_credentials
 // ---------------------------------------------------------------------------
 
-async function handleFetchSipCredentials(context: Record<string, unknown>): Promise<Response> {
+async function handleFetchSipCredentials(
+  context: Record<string, unknown>,
+  partnerSession: PartnerSession | null,
+): Promise<Response> {
   const userId = typeof context['userId'] === 'number' ? context['userId'] : null;
   if (userId == null) {
     return Response.json(
@@ -192,21 +182,40 @@ async function handleFetchSipCredentials(context: Record<string, unknown>): Prom
     );
   }
 
-  const sf = await getServiceAccountSfSession();
-  if (!sf) {
+  if (!partnerSession) {
+    // Charlie's session row had no `partnerSession` block, or it was
+    // malformed. The user logged in before this code path existed
+    // (so their session predates `partner_session`), or AVS isn't
+    // installed so introspection couldn't ship a usable SF token.
+    // Either way, the user needs to log out + log back in for the
+    // session to pick up.
     return Response.json(
-      { active: false, reason: 'CALLBACK_SF_AUTH_UNAVAILABLE' },
+      { active: false, reason: 'NO_PARTNER_SESSION' },
       { status: 200 },
     );
   }
 
   let creds;
   try {
-    creds = await getWebphoneSipCredentials(sf.instanceUrl, sf.accessToken, userId);
+    creds = await getWebphoneSipCredentials(
+      partnerSession.instanceUrl,
+      partnerSession.accessToken,
+      userId,
+    );
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // SF returns 401 / `INVALID_SESSION_ID` once the user's token
+    // expires or is revoked. Surface it as a soft inactive — Charlie
+    // returns null, the resolver falls back to placeholder, the UI
+    // surfaces "no webphone provisioned" until the user re-auths.
+    if (/INVALID_SESSION_ID|401/i.test(message)) {
+      return Response.json(
+        { active: false, reason: 'PARTNER_SESSION_EXPIRED' },
+        { status: 200 },
+      );
+    }
     console.warn(
-      `[charlie/callback] fetch_sip_credentials: SOQL failed for NBX user ${userId}: ${err instanceof Error ? err.message : String(err)
-      }`,
+      `[charlie/callback] fetch_sip_credentials: SOQL failed for NBX user ${userId}: ${message}`,
     );
     return Response.json(
       { active: false, reason: 'CALLBACK_SOQL_ERROR' },
@@ -242,95 +251,28 @@ async function handleFetchSipCredentials(context: Record<string, unknown>): Prom
 }
 
 // ---------------------------------------------------------------------------
-// Service-account SF session.
+// partner_session parsing.
 //
-// Phase-1.1 stub: username + password grant against a configured
-// Connected App. Phase 2 should swap to JWT Bearer (private key in
-// Secrets Manager).
+// Validates the shape Charlie ships (`{ accessToken, instanceUrl }`)
+// without throwing — a malformed session is treated the same as
+// "missing": the dispatch returns active: false with a diagnostic
+// reason rather than 4xx-ing the partner callback.
 // ---------------------------------------------------------------------------
 
-async function getServiceAccountSfSession(): Promise<{
-  instanceUrl: string;
-  accessToken: string;
-} | null> {
-  const now = Date.now();
-  if (
-    cachedSfSession &&
-    cachedSfSession.expiresAt > now + SF_SESSION_REFRESH_BEFORE_EXPIRY_MS
-  ) {
-    return cachedSfSession;
-  }
-
-  const tokenUrl = env.CHARLIE_CALLBACK_SF_TOKEN_URL ?? 'https://login.salesforce.com/services/oauth2/token';
-  const clientId = env.CHARLIE_CALLBACK_SF_CLIENT_ID;
-  const clientSecret = env.CHARLIE_CALLBACK_SF_CLIENT_SECRET;
-  const username = env.CHARLIE_CALLBACK_SF_USERNAME;
-  // Note: password should already include the security token suffix
-  // unless the Connected App is on a trusted IP. Document this in the
-  // env-var description.
-  const password = env.CHARLIE_CALLBACK_SF_PASSWORD;
-
-  if (!clientId || !clientSecret || !username || !password) {
-    console.warn(
-      '[charlie/callback] service-account SF env not configured; ' +
-      'fetch_sip_credentials will return active: false. Set ' +
-      'CHARLIE_CALLBACK_SF_CLIENT_ID, _CLIENT_SECRET, _USERNAME, _PASSWORD.',
-    );
-    return null;
-  }
-
-  const params = new URLSearchParams({
-    grant_type: 'password',
-    client_id: clientId,
-    client_secret: clientSecret,
-    username,
-    password,
-  });
-
-  let response;
+function parsePartnerSession(value: unknown): PartnerSession | null {
+  if (value == null || typeof value !== 'object') return null;
+  const obj = value as Record<string, unknown>;
+  const accessToken = typeof obj['accessToken'] === 'string' ? obj['accessToken'] : null;
+  const instanceUrl = typeof obj['instanceUrl'] === 'string' ? obj['instanceUrl'] : null;
+  if (!accessToken || !instanceUrl) return null;
+  // Defensive — SF instance URLs are always https://. If we ever ship
+  // anything else here it's a config bug; reject so we don't make
+  // outbound HTTP requests to attacker-controlled origins.
   try {
-    response = await fetch(tokenUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params.toString(),
-    });
-  } catch (err) {
-    console.warn(
-      `[charlie/callback] SF service-account auth fetch failed: ${err instanceof Error ? err.message : String(err)
-      }`,
-    );
-    return null;
-  }
-
-  if (!response.ok) {
-    const errText = await response.text().catch(() => '');
-    console.warn(
-      `[charlie/callback] SF service-account auth returned ${response.status}: ${errText.slice(0, 300)}`,
-    );
-    return null;
-  }
-
-  let json: { access_token?: string; instance_url?: string; issued_at?: string };
-  try {
-    json = (await response.json()) as typeof json;
+    const parsed = new URL(instanceUrl);
+    if (parsed.protocol !== 'https:') return null;
   } catch {
-    console.warn('[charlie/callback] SF service-account auth body was not JSON');
     return null;
   }
-
-  if (!json.access_token || !json.instance_url) {
-    console.warn(
-      '[charlie/callback] SF service-account auth response missing access_token / instance_url',
-    );
-    return null;
-  }
-
-  // SF doesn't return an `expires_in`; service-account tokens default
-  // to 2h on most orgs. Cache for 1h to be safe.
-  cachedSfSession = {
-    instanceUrl: json.instance_url,
-    accessToken: json.access_token,
-    expiresAt: now + 60 * 60 * 1000,
-  };
-  return cachedSfSession;
+  return { accessToken, instanceUrl };
 }
