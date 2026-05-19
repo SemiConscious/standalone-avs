@@ -320,6 +320,194 @@ export async function getNatterboxUserId(
 }
 
 /**
+ * Resolved webphone SIP credentials, suitable for handing to a SIP UA
+ * (JsSIP, etc.) to register against `webphoned`.
+ *
+ * `username` is the device extension number (e.g. `12027`); `password`
+ * is the cleartext SIP password decrypted from `nbavs__Device__c.nbavs__Password__c`;
+ * `domain` is the SIP realm/domain configured on the org's `nbavs__API_v1__c`
+ * custom setting; `host` is the WebSocket host the UA registers to (e.g.
+ * `webphone.natterbox.net`).
+ */
+export interface WebphoneSipCredentials {
+  username: string;
+  password: string;
+  domain: string;
+  host: string;
+  /** SIP extension on the user record (per `nbavs__User__c.nbavs__SipExtension__c`). */
+  ext?: string;
+}
+
+/**
+ * Resolve the webphone SIP credentials for a Salesforce user.
+ *
+ * Mirrors what the AVS Apex `WebphoneAutoLoadController.loadWebPhone()`
+ * does to populate the `authToken` it hands to the legacy
+ * `phone.php` iframe:
+ *
+ *   1. Find the user's `nbavs__User__c` record (SOQL on
+ *      `WHERE nbavs__User__c = '<sfUserId>'`).
+ *   2. Find the user's `'Web Phone'`-typed `nbavs__Device__c` record via
+ *      `nbavs__DeviceMapping__c.nbavs__Device__c` lookup.
+ *   3. Decrypt the device's `nbavs__Password__c` (AES-256-CBC with managed
+ *      IV — port of `Encryption.decryptString` from the AVS package; see
+ *      `decryptString()` above) using the org's `nbavs__API_v1__c.nbavs__Key__c`.
+ *   4. Pull the SIP domain + webphone host from the same `nbavs__API_v1__c`
+ *      custom setting.
+ *
+ * The AVS package then encrypts this whole bundle into an `authToken` URL
+ * parameter and hands it to `phone.php`, which decrypts and stores it in
+ * cookies for the legacy server-rendered phone. We bypass that pipeline:
+ * the cleartext credentials flow back through the introspect response,
+ * Charlie's session store, and `getMediaTransport` to the standalone-avs
+ * webphone widget, which uses them for a JsSIP REGISTER directly.
+ *
+ * Returns null on any failure (no `nbavs__User__c` record, no Web Phone
+ * device, decryption error, etc.). Charlie falls back to a placeholder
+ * password and the widget surfaces a "no webphone provisioned" hint.
+ */
+export async function getWebphoneSipCredentials(
+  instanceUrl: string,
+  accessToken: string,
+  salesforceUserId: string
+): Promise<WebphoneSipCredentials | null> {
+  // ---------------------------------------------------------------------
+  // Step 1: API settings — pulls Key__c (decrypt key), SipDomain__c, and
+  // WebPhoneHost__c. fetchApiSettings is cached at module level, so this
+  // is normally free after the first introspect roundtrip per cold start.
+  // ---------------------------------------------------------------------
+  let settings: ApiSettings;
+  try {
+    settings = await fetchApiSettings(instanceUrl, accessToken);
+  } catch (err) {
+    console.warn(
+      `[Gatekeeper] getWebphoneSipCredentials: API settings fetch failed: ${err instanceof Error ? err.message : String(err)}`
+    );
+    return null;
+  }
+
+  if (!settings.Key__c) {
+    console.warn(
+      '[Gatekeeper] getWebphoneSipCredentials: API_v1__c.Key__c missing; cannot decrypt SIP password'
+    );
+    return null;
+  }
+  const sipDomain = (settings['SipDomain__c'] as string | undefined) ?? '';
+  const webphoneHost =
+    (settings['WebPhoneHost__c'] as string | undefined) ?? 'https://webphone.natterbox.net';
+
+  // ---------------------------------------------------------------------
+  // Step 2: SOQL the user's webphone-typed device + the user's SIP ext.
+  //
+  // We use a single nested-IN query so the round-trip is one SOQL call
+  // instead of three. The pattern mirrors AVS Apex's
+  // `WebphoneAutoLoadController.loadWebPhone()` exactly:
+  //
+  //   - Outer: nbavs__Device__c WHERE Type__c='Web Phone'
+  //     AND Id IN (...)
+  //   - Inner: nbavs__DeviceMapping__c.nbavs__Device__c WHERE User__c IN (...)
+  //   - Innermost: nbavs__User__c.Id WHERE nbavs__User__c = '<sfUserId>'
+  //
+  // The user's SipExtension__c comes back via a parallel SOQL on
+  // nbavs__User__c — strictly speaking the device's Extension__c is
+  // what JsSIP REGISTERs as, but we surface SipExtension__c too for
+  // diagnostics + the eventual From-header CLI.
+  // ---------------------------------------------------------------------
+  const safeSfUserId = salesforceUserId.replace(/'/g, ''); // SOQL injection-safe
+  const deviceSoql =
+    `SELECT nbavs__Extension__c, nbavs__Password__c ` +
+    `FROM nbavs__Device__c ` +
+    `WHERE nbavs__Type__c = 'Web Phone' ` +
+    `AND Id IN ( ` +
+    `  SELECT nbavs__Device__c FROM nbavs__DeviceMapping__c ` +
+    `  WHERE nbavs__User__c IN ( ` +
+    `    SELECT Id FROM nbavs__User__c WHERE nbavs__User__c = '${safeSfUserId}' ` +
+    `  ) ` +
+    `) ` +
+    `LIMIT 1`;
+  const userSoql = `SELECT nbavs__SipExtension__c FROM nbavs__User__c WHERE nbavs__User__c = '${safeSfUserId}' LIMIT 1`;
+
+  let deviceRecord: { nbavs__Extension__c?: string; nbavs__Password__c?: string } | null = null;
+  let userRecord: { nbavs__SipExtension__c?: string } | null = null;
+
+  try {
+    const [deviceResult, userResult] = await Promise.all([
+      runSoql(instanceUrl, accessToken, deviceSoql),
+      runSoql(instanceUrl, accessToken, userSoql),
+    ]);
+    deviceRecord = deviceResult.records?.[0] ?? null;
+    userRecord = userResult.records?.[0] ?? null;
+  } catch (err) {
+    console.warn(
+      `[Gatekeeper] getWebphoneSipCredentials: SOQL failed: ${err instanceof Error ? err.message : String(err)}`
+    );
+    return null;
+  }
+
+  if (!deviceRecord || !deviceRecord.nbavs__Extension__c) {
+    console.warn(
+      `[Gatekeeper] getWebphoneSipCredentials: no Web Phone device assigned to SF user ${salesforceUserId}`
+    );
+    return null;
+  }
+
+  if (!deviceRecord.nbavs__Password__c) {
+    console.warn(
+      `[Gatekeeper] getWebphoneSipCredentials: device ${deviceRecord.nbavs__Extension__c} has no Password__c`
+    );
+    return null;
+  }
+
+  // ---------------------------------------------------------------------
+  // Step 3: Decrypt. decryptString returns the original ciphertext on
+  // failure (matching Apex behaviour) — that's not useful for SIP
+  // REGISTER, so we treat any output that still looks base64-shaped
+  // (>= 44 chars, no plain ASCII letters that look passwordy) as a
+  // decrypt failure and return null. SIP passwords are typically 16-32
+  // alphanumeric chars; ciphertext is base64-padded > 40.
+  // ---------------------------------------------------------------------
+  const decrypted = decryptString(deviceRecord.nbavs__Password__c, settings.Key__c);
+  if (decrypted === deviceRecord.nbavs__Password__c) {
+    console.warn(
+      `[Gatekeeper] getWebphoneSipCredentials: decryptString returned the input verbatim; assuming decryption failed for device ${deviceRecord.nbavs__Extension__c}`
+    );
+    return null;
+  }
+
+  return {
+    username: deviceRecord.nbavs__Extension__c,
+    password: decrypted,
+    domain: sipDomain,
+    host: webphoneHost,
+    ...(userRecord?.nbavs__SipExtension__c && { ext: userRecord.nbavs__SipExtension__c }),
+  };
+}
+
+/**
+ * Tiny SOQL runner. Co-located with `getWebphoneSipCredentials` because
+ * the existing `getNatterboxUserId` does its own fetch + parse — keeping
+ * the helper next to its consumer keeps the change targeted.
+ */
+async function runSoql<T = Record<string, unknown>>(
+  instanceUrl: string,
+  accessToken: string,
+  soql: string
+): Promise<{ records: T[] }> {
+  const url = `${instanceUrl}/services/data/v62.0/query?q=${encodeURIComponent(soql)}`;
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`SOQL ${response.status}: ${errorText.slice(0, 200)}`);
+  }
+  return (await response.json()) as { records: T[] };
+}
+
+/**
  * Get a JWT from Gatekeeper
  * 
  * This is the main entry point - it handles the full flow:

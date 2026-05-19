@@ -42,6 +42,7 @@ import {
   getNatterboxUserId,
   getSapienAccessTokenWithExpiry,
   getSapienHost,
+  getWebphoneSipCredentials,
 } from '$lib/server/gatekeeper';
 
 const SF_USERINFO_DEFAULT = 'https://login.salesforce.com/services/oauth2/userinfo';
@@ -178,6 +179,12 @@ export const POST: RequestHandler = async ({ request, url, fetch }) => {
   let sapienAccessTokenExpiresAt: number | undefined;
   let sapienResolvedOrgId: number | undefined;
   let sapienResolvedUserId: number | undefined;
+  // SIP credentials for the user's webphone-typed device, decrypted
+  // from `nbavs__Device__c.nbavs__Password__c`. Shipped to Charlie via
+  // `xNbox.sipCredentials` and stored in the session DDB; consumed by
+  // `getMediaTransport`. Null when the user has no Web Phone device or
+  // when decryption fails; Charlie falls back to a placeholder.
+  let sipCredentials: Awaited<ReturnType<typeof getWebphoneSipCredentials>> = null;
   const instanceUrl =
     env.CHARLIE_INTROSPECTION_SF_INSTANCE_URL ?? userinfo.urls?.rest?.split('/services/')[0];
   if (instanceUrl) {
@@ -224,8 +231,8 @@ export const POST: RequestHandler = async ({ request, url, fetch }) => {
         } catch (identityErr) {
           console.warn(
             '[charlie/introspect] Sapien /user/me lookup failed (orgId resolution); ' +
-              'falling back to CHARLIE_INTROSPECTION_NBX_ORG_ID stub. Error: ' +
-              `${identityErr instanceof Error ? identityErr.message : String(identityErr)}`,
+            'falling back to CHARLIE_INTROSPECTION_NBX_ORG_ID stub. Error: ' +
+            `${identityErr instanceof Error ? identityErr.message : String(identityErr)}`,
           );
         }
       }
@@ -244,14 +251,42 @@ export const POST: RequestHandler = async ({ request, url, fetch }) => {
             `placeholder). Error: ${mapErr instanceof Error ? mapErr.message : String(mapErr)}`,
         );
       }
+      // ---------------------------------------------------------------
+      // Resolve webphone SIP credentials from the AVS Salesforce
+      // package. The cleartext password lives in
+      // `nbavs__Device__c.nbavs__Password__c` (encrypted with AES-256-CBC
+      // + the org's `nbavs__API_v1__c.nbavs__Key__c`). Sapien REST
+      // exposes only a boolean `webphone:true` flag on `/sip-device`,
+      // not the credentials, so SF is the canonical source for the
+      // password. See the AVS `WebphoneAutoLoadController.cls` for the
+      // reference Apex implementation we're mirroring server-side.
+      //
+      // Failures here aren't fatal — the introspect endpoint returns
+      // identity-only and Charlie's `getMediaTransport` falls back to
+      // a placeholder password. The widget surfaces a helpful "no
+      // webphone provisioned" hint via `WebphoneClient`'s
+      // PLACEHOLDER_PASSWORD_RE detection.
+      // ---------------------------------------------------------------
+      try {
+        sipCredentials = await getWebphoneSipCredentials(
+          instanceUrl,
+          subjectToken,
+          userinfo.user_id,
+        );
+      } catch (sipErr) {
+        console.warn(
+          '[charlie/introspect] SIP-credential resolution failed; falling back to ' +
+            `placeholder webphone provisioning. Error: ${sipErr instanceof Error ? sipErr.message : String(sipErr)}`,
+        );
+      }
     } catch (err) {
       // Don't fail the whole introspection — Charlie copes with
       // missing-token sessions. Just log so an operator can investigate
       // why this partner's Sapien provisioning is broken.
       console.warn(
         '[charlie/introspect] Sapien access-token acquisition failed; ' +
-          'returning identity-only response. Sapien-backed Charlie resolvers will return SESSION_NOT_FOUND. ' +
-          `Error: ${err instanceof Error ? err.message : String(err)}`,
+        'returning identity-only response. Sapien-backed Charlie resolvers will return SESSION_NOT_FOUND. ' +
+        `Error: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
@@ -298,6 +333,19 @@ export const POST: RequestHandler = async ({ request, url, fetch }) => {
   if (sapienAccessToken && sapienAccessTokenExpiresAt) {
     xNbox['sapienAccessToken'] = sapienAccessToken;
     xNbox['sapienAccessTokenExpiresAt'] = sapienAccessTokenExpiresAt;
+  }
+  if (sipCredentials) {
+    // Shipped to Charlie's session-store keyed by the JWT jti (defence
+    // in depth: cleartext SIP password never lands in the JWT body
+    // itself). `getMediaTransport` reads it back from the session
+    // store and returns it to the webphone widget for JsSIP REGISTER.
+    xNbox['sipCredentials'] = {
+      username: sipCredentials.username,
+      password: sipCredentials.password,
+      domain: sipCredentials.domain,
+      host: sipCredentials.host,
+      ...(sipCredentials.ext != null && { ext: sipCredentials.ext }),
+    };
   }
 
   return new Response(
