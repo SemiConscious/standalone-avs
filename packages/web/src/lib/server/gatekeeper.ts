@@ -75,7 +75,7 @@ export async function fetchApiSettings(
   }
 
   const url = `${instanceUrl}/services/apexrest/nbavs/HostUrlSettings/APISettings`;
-  
+
   console.log('[Gatekeeper] Fetching API settings from:', url);
 
   const response = await fetch(url, {
@@ -93,7 +93,7 @@ export async function fetchApiSettings(
   }
 
   const rawSettings = await response.json();
-  
+
   // Normalize field names: strip namespace prefix (e.g., nbavs__Field__c -> Field__c)
   const settings: ApiSettings = {};
   for (const [key, value] of Object.entries(rawSettings)) {
@@ -191,14 +191,14 @@ export async function authenticateWithSapien(settings: ApiSettings): Promise<Sap
   }
 
   // Validate required settings
-  if (!settings.ClientId__c || !settings.ClientSecret__c || 
-      !settings.Username__c || !settings.Password__c || !settings.Key__c || !settings.Host__c) {
+  if (!settings.ClientId__c || !settings.ClientSecret__c ||
+    !settings.Username__c || !settings.Password__c || !settings.Key__c || !settings.Host__c) {
     throw new Error('Missing required API settings for Sapien authentication');
   }
 
   // Decrypt the password
   const decryptedPassword = decryptString(settings.Password__c, settings.Key__c);
-  
+
   console.log('[Gatekeeper] Authenticating with Sapien...');
 
   // Build OAuth request body
@@ -231,7 +231,7 @@ export async function authenticateWithSapien(settings: ApiSettings): Promise<Sap
   }
 
   const authResult = await response.json();
-  
+
   console.log('[Gatekeeper] Sapien authentication successful');
   console.log('[Gatekeeper] Sapien session response:', JSON.stringify({
     scope: authResult.scope,
@@ -339,37 +339,43 @@ export interface WebphoneSipCredentials {
 }
 
 /**
- * Resolve the webphone SIP credentials for a Salesforce user.
+ * Resolve the webphone SIP credentials for a Natterbox user.
  *
- * Mirrors what the AVS Apex `WebphoneAutoLoadController.loadWebPhone()`
- * does to populate the `authToken` it hands to the legacy
- * `phone.php` iframe:
+ * Called by `/api/charlie/callback/+server.ts` when Charlie posts a
+ * `{ reason: 'fetch_sip_credentials', context: { organizationId,
+ * userId } }` request. Returns the cleartext SIP password Charlie
+ * needs to hand back to the standalone-avs webphone widget for
+ * JsSIP REGISTER.
  *
- *   1. Find the user's `nbavs__User__c` record (SOQL on
- *      `WHERE nbavs__User__c = '<sfUserId>'`).
- *   2. Find the user's `'Web Phone'`-typed `nbavs__Device__c` record via
- *      `nbavs__DeviceMapping__c.nbavs__Device__c` lookup.
- *   3. Decrypt the device's `nbavs__Password__c` (AES-256-CBC with managed
- *      IV — port of `Encryption.decryptString` from the AVS package; see
- *      `decryptString()` above) using the org's `nbavs__API_v1__c.nbavs__Key__c`.
- *   4. Pull the SIP domain + webphone host from the same `nbavs__API_v1__c`
- *      custom setting.
+ * Mirrors AVS Apex `WebphoneAutoLoadController.loadWebPhone()`:
  *
- * The AVS package then encrypts this whole bundle into an `authToken` URL
- * parameter and hands it to `phone.php`, which decrypts and stores it in
- * cookies for the legacy server-rendered phone. We bypass that pipeline:
- * the cleartext credentials flow back through the introspect response,
- * Charlie's session store, and `getMediaTransport` to the standalone-avs
- * webphone widget, which uses them for a JsSIP REGISTER directly.
+ *   1. Find the user's `nbavs__User__c` record by Natterbox numeric id
+ *      (via the `nbavs__Id__c` field). Could equally accept the SF user
+ *      id and look up by the `nbavs__User__c` lookup field; we use the
+ *      Natterbox id because that's what the partner-callback context
+ *      carries (Charlie has already resolved SF→NBX at JWT-issue
+ *      time via `/api/charlie/introspect`).
+ *   2. Find the user's `'Web Phone'`-typed `nbavs__Device__c` via the
+ *      `nbavs__DeviceMapping__c` join. Two queries instead of one
+ *      nested-IN — Salesforce SOQL caps semi-join nesting at one
+ *      level, and the chain `Device → DeviceMapping → User` already
+ *      uses the budget.
+ *   3. Decrypt `nbavs__Password__c` (AES-256-CBC with managed IV —
+ *      port of `Encryption.decryptString` from the AVS package; see
+ *      `decryptString()` above) using `nbavs__API_v1__c.nbavs__Key__c`.
+ *   4. Pull `SipDomain__c` + `WebPhoneHost__c` from the same
+ *      `nbavs__API_v1__c` custom setting.
  *
- * Returns null on any failure (no `nbavs__User__c` record, no Web Phone
- * device, decryption error, etc.). Charlie falls back to a placeholder
- * password and the widget surfaces a "no webphone provisioned" hint.
+ * Returns `null` on any failure (no `nbavs__User__c` record for that
+ * Natterbox id, no Web Phone device assigned, decryption error,
+ * etc.). The partner-callback handler turns `null` into
+ * `{ active: false }`; Charlie falls back to a placeholder password
+ * and the widget surfaces a "no webphone provisioned" hint.
  */
 export async function getWebphoneSipCredentials(
   instanceUrl: string,
   accessToken: string,
-  salesforceUserId: string
+  natterboxUserId: number,
 ): Promise<WebphoneSipCredentials | null> {
   // ---------------------------------------------------------------------
   // Step 1: API settings — pulls Key__c (decrypt key), SipDomain__c, and
@@ -381,14 +387,14 @@ export async function getWebphoneSipCredentials(
     settings = await fetchApiSettings(instanceUrl, accessToken);
   } catch (err) {
     console.warn(
-      `[Gatekeeper] getWebphoneSipCredentials: API settings fetch failed: ${err instanceof Error ? err.message : String(err)}`
+      `[Gatekeeper] getWebphoneSipCredentials: API settings fetch failed: ${err instanceof Error ? err.message : String(err)}`,
     );
     return null;
   }
 
   if (!settings.Key__c) {
     console.warn(
-      '[Gatekeeper] getWebphoneSipCredentials: API_v1__c.Key__c missing; cannot decrypt SIP password'
+      '[Gatekeeper] getWebphoneSipCredentials: API_v1__c.Key__c missing; cannot decrypt SIP password',
     );
     return null;
   }
@@ -397,79 +403,97 @@ export async function getWebphoneSipCredentials(
     (settings['WebPhoneHost__c'] as string | undefined) ?? 'https://webphone.natterbox.net';
 
   // ---------------------------------------------------------------------
-  // Step 2: SOQL the user's webphone-typed device + the user's SIP ext.
+  // Step 2: Two SOQL queries (semi-join nesting depth = 1 each).
   //
-  // We use a single nested-IN query so the round-trip is one SOQL call
-  // instead of three. The pattern mirrors AVS Apex's
-  // `WebphoneAutoLoadController.loadWebPhone()` exactly:
+  // Query A: find the user's nbavs__User__c SF record id from the
+  // Natterbox numeric id. Charlie hands us the NBX id in the
+  // partner-callback `context`; we need the SF Id to filter
+  // DeviceMapping below.
   //
-  //   - Outer: nbavs__Device__c WHERE Type__c='Web Phone'
-  //     AND Id IN (...)
-  //   - Inner: nbavs__DeviceMapping__c.nbavs__Device__c WHERE User__c IN (...)
-  //   - Innermost: nbavs__User__c.Id WHERE nbavs__User__c = '<sfUserId>'
+  // Query B: find the user's Web Phone-typed device. The Apex
+  // reference uses the same chain:
+  //   nbavs__Device__c WHERE Type__c='Web Phone'
+  //     AND Id IN (
+  //       SELECT nbavs__Device__c FROM nbavs__DeviceMapping__c
+  //       WHERE nbavs__User__c = '<userRecordSfId>'
+  //     )
   //
-  // The user's SipExtension__c comes back via a parallel SOQL on
-  // nbavs__User__c — strictly speaking the device's Extension__c is
-  // what JsSIP REGISTERs as, but we surface SipExtension__c too for
-  // diagnostics + the eventual From-header CLI.
+  // We can't fold the Natterbox-id → SF-id lookup into a third
+  // semi-join because Salesforce caps semi-join nesting at one level
+  // (the outer Device → DeviceMapping is already the cap). Two
+  // round-trips, ~50ms each — fine for the cache-on-callback path.
   // ---------------------------------------------------------------------
-  const safeSfUserId = salesforceUserId.replace(/'/g, ''); // SOQL injection-safe
+  const safeNbxId = String(Math.trunc(natterboxUserId)); // SOQL-injection-safe (number)
+  const userIdSoql = `SELECT Id, nbavs__SipExtension__c FROM nbavs__User__c WHERE nbavs__Id__c = ${safeNbxId} LIMIT 1`;
+  let userRecord: { Id?: string; nbavs__SipExtension__c?: string } | null = null;
+  try {
+    const userResult = await runSoql<{ Id?: string; nbavs__SipExtension__c?: string }>(
+      instanceUrl,
+      accessToken,
+      userIdSoql,
+    );
+    userRecord = userResult.records?.[0] ?? null;
+  } catch (err) {
+    console.warn(
+      `[Gatekeeper] getWebphoneSipCredentials: nbavs__User__c lookup failed for NBX id ${natterboxUserId}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return null;
+  }
+  if (!userRecord?.Id) {
+    console.warn(
+      `[Gatekeeper] getWebphoneSipCredentials: no nbavs__User__c found for NBX id ${natterboxUserId}`,
+    );
+    return null;
+  }
+  const safeSfUserCustomId = userRecord.Id.replace(/'/g, '');
+
   const deviceSoql =
     `SELECT nbavs__Extension__c, nbavs__Password__c ` +
     `FROM nbavs__Device__c ` +
     `WHERE nbavs__Type__c = 'Web Phone' ` +
     `AND Id IN ( ` +
     `  SELECT nbavs__Device__c FROM nbavs__DeviceMapping__c ` +
-    `  WHERE nbavs__User__c IN ( ` +
-    `    SELECT Id FROM nbavs__User__c WHERE nbavs__User__c = '${safeSfUserId}' ` +
-    `  ) ` +
+    `  WHERE nbavs__User__c = '${safeSfUserCustomId}' ` +
     `) ` +
     `LIMIT 1`;
-  const userSoql = `SELECT nbavs__SipExtension__c FROM nbavs__User__c WHERE nbavs__User__c = '${safeSfUserId}' LIMIT 1`;
 
   let deviceRecord: { nbavs__Extension__c?: string; nbavs__Password__c?: string } | null = null;
-  let userRecord: { nbavs__SipExtension__c?: string } | null = null;
-
   try {
-    const [deviceResult, userResult] = await Promise.all([
-      runSoql(instanceUrl, accessToken, deviceSoql),
-      runSoql(instanceUrl, accessToken, userSoql),
-    ]);
+    const deviceResult = await runSoql<{
+      nbavs__Extension__c?: string;
+      nbavs__Password__c?: string;
+    }>(instanceUrl, accessToken, deviceSoql);
     deviceRecord = deviceResult.records?.[0] ?? null;
-    userRecord = userResult.records?.[0] ?? null;
   } catch (err) {
     console.warn(
-      `[Gatekeeper] getWebphoneSipCredentials: SOQL failed: ${err instanceof Error ? err.message : String(err)}`
+      `[Gatekeeper] getWebphoneSipCredentials: device SOQL failed for NBX id ${natterboxUserId}: ${err instanceof Error ? err.message : String(err)}`,
     );
     return null;
   }
 
   if (!deviceRecord || !deviceRecord.nbavs__Extension__c) {
     console.warn(
-      `[Gatekeeper] getWebphoneSipCredentials: no Web Phone device assigned to SF user ${salesforceUserId}`
+      `[Gatekeeper] getWebphoneSipCredentials: no Web Phone device assigned to NBX user ${natterboxUserId}`,
     );
     return null;
   }
 
   if (!deviceRecord.nbavs__Password__c) {
     console.warn(
-      `[Gatekeeper] getWebphoneSipCredentials: device ${deviceRecord.nbavs__Extension__c} has no Password__c`
+      `[Gatekeeper] getWebphoneSipCredentials: device ${deviceRecord.nbavs__Extension__c} has no Password__c`,
     );
     return null;
   }
 
   // ---------------------------------------------------------------------
   // Step 3: Decrypt. decryptString returns the original ciphertext on
-  // failure (matching Apex behaviour) — that's not useful for SIP
-  // REGISTER, so we treat any output that still looks base64-shaped
-  // (>= 44 chars, no plain ASCII letters that look passwordy) as a
-  // decrypt failure and return null. SIP passwords are typically 16-32
-  // alphanumeric chars; ciphertext is base64-padded > 40.
+  // failure (matching Apex behaviour) — not useful for SIP REGISTER,
+  // so we detect that case and return null.
   // ---------------------------------------------------------------------
   const decrypted = decryptString(deviceRecord.nbavs__Password__c, settings.Key__c);
   if (decrypted === deviceRecord.nbavs__Password__c) {
     console.warn(
-      `[Gatekeeper] getWebphoneSipCredentials: decryptString returned the input verbatim; assuming decryption failed for device ${deviceRecord.nbavs__Extension__c}`
+      `[Gatekeeper] getWebphoneSipCredentials: decryptString returned the input verbatim; assuming decryption failed for device ${deviceRecord.nbavs__Extension__c}`,
     );
     return null;
   }
@@ -579,7 +603,7 @@ export async function getJwt(
   }
 
   const responseData = JSON.parse(responseText);
-  
+
   if (!responseData.jwt) {
     throw new Error('No JWT returned by Gatekeeper');
   }
@@ -588,7 +612,7 @@ export async function getJwt(
 
   // Decode and cache
   const payload = decodeJwtPayload(jwt);
-  
+
   console.log('[Gatekeeper] JWT received successfully');
   console.log('[Gatekeeper] JWT payload:', JSON.stringify(payload, null, 2));
   console.log('[Gatekeeper] JWT scope:', payload.scope);
@@ -850,7 +874,7 @@ export async function sapienApiRequest<T = unknown>(
 ): Promise<T> {
   // Get Sapien access token (this will also cache API settings)
   const sapienToken = await getSapienAccessToken(instanceUrl, sfAccessToken);
-  
+
   const sapienHost = getSapienHost();
   if (!sapienHost) {
     throw new Error('Sapien host not configured');
@@ -870,7 +894,7 @@ export async function sapienApiRequest<T = unknown>(
   }
 
   const endpoint = `${sapienHost}${path.startsWith('/') ? path : '/' + path}`;
-  
+
   console.log(`[Sapien API] ${actualMethod} ${endpoint}`);
 
   const fetchOptions: RequestInit = {
@@ -893,7 +917,7 @@ export async function sapienApiRequest<T = unknown>(
   if (!text || text.trim() === '') {
     return {} as T;
   }
-  
+
   return JSON.parse(text) as T;
 }
 
@@ -949,10 +973,10 @@ export async function getSapienUserDetails(
   }
 
   const responseData = await response.json();
-  
+
   // Sapien wraps the user in a "data" property
   const userData = responseData.data || responseData;
-  
+
   console.log('[Gatekeeper] User details from Sapien:');
   console.log('[Gatekeeper]   ID:', userData.id);
   console.log('[Gatekeeper]   Username:', userData.userName);
@@ -1023,7 +1047,7 @@ export async function getSalesforceOrgId(
   accessToken: string
 ): Promise<string> {
   const url = `${instanceUrl}/services/data/v55.0/query?q=SELECT+Id+FROM+Organization+LIMIT+1`;
-  
+
   const response = await fetch(url, {
     method: 'GET',
     headers: {
@@ -1041,7 +1065,7 @@ export async function getSalesforceOrgId(
     // Return first 15 characters (standard Salesforce Org ID format)
     return data.records[0].Id.substring(0, 15);
   }
-  
+
   throw new Error('Could not find Salesforce Organization ID');
 }
 
@@ -1057,13 +1081,13 @@ export async function getLicenseFromSapien(
   if (!cachedApiSettings) {
     await fetchApiSettings(instanceUrl, accessToken);
   }
-  
+
   const sapienAccessToken = await getSapienAccessToken(instanceUrl, accessToken);
   const sfOrgId = await getSalesforceOrgId(instanceUrl, accessToken);
-  
+
   // Get the base Sapien host (without /v1 suffix for this endpoint)
   const sapienHost = cachedApiSettings?.Host__c?.replace(/\/v1\/?$/, '').replace(/\/+$/, '') || '';
-  
+
   if (!sapienHost) {
     console.error('[Gatekeeper] No Sapien host configured for license fetch');
     return null;
@@ -1071,7 +1095,7 @@ export async function getLicenseFromSapien(
 
   // The license endpoint is at /extra/license/{sfOrgId}
   const url = `${sapienHost}/extra/license/${sfOrgId}`;
-  
+
   console.log('[Gatekeeper] Fetching license from:', url);
 
   try {
@@ -1107,53 +1131,53 @@ export async function getLicenseFromSapien(
       Voice_Count__c: dataNode.Numbers_Count__c ?? dataNode.numbersCount ?? 0,
       PBX__c: !!dataNode.PBX__c || !!dataNode.pbx,
       PBX_Count__c: dataNode.PBX_Count__c ?? dataNode.pbxCount ?? 0,
-      
+
       // Contact Centre / Manager
       ContactCentre__c: !!dataNode.Manager__c || !!dataNode.manager,
       ContactCentre_Count__c: dataNode.Manager_Count__c ?? dataNode.managerCount ?? 0,
       Manager__c: !!dataNode.Manager__c || !!dataNode.manager,
       Manager_Count__c: dataNode.Manager_Count__c ?? dataNode.managerCount ?? 0,
-      
+
       // Record
       Record__c: !!dataNode.Record__c || !!dataNode.record,
       Record_Count__c: dataNode.Record_Count__c ?? dataNode.recordCount ?? 0,
-      
+
       // CTI
       CTI__c: !!dataNode.CTI__c || !!dataNode.cti,
       CTI_Count__c: dataNode.CTI_Count__c ?? dataNode.ctiCount ?? 0,
-      
+
       // PCI
       PCI__c: !!dataNode.PCI__c || !!dataNode.pci,
       PCI_Count__c: dataNode.PCI_Count__c ?? dataNode.pciCount ?? 0,
-      
+
       // Insights/AI Advisor
       Insights__c: !!dataNode.Insights__c || !!dataNode.insights,
       Insights_Count__c: dataNode.Insights_Count__c ?? dataNode.insightsCount ?? 0,
       AIAdvisor__c: !!dataNode.Insights__c || !!dataNode.insights,
       AIAdvisor_Count__c: dataNode.Insights_Count__c ?? dataNode.insightsCount ?? 0,
-      
+
       // Freedom
       Freedom__c: !!dataNode.Freedom__c || !!dataNode.freedom,
       Freedom_Count__c: dataNode.Freedom_Count__c ?? dataNode.freedomCount ?? 0,
-      
+
       // Service Cloud Voice
       ServiceCloudVoice__c: !!dataNode.SCV__c || !!dataNode.scv,
       ServiceCloudVoice_Count__c: dataNode.SCV_Count__c ?? dataNode.scvCount ?? 0,
-      
+
       // SMS
       SMS__c: !!dataNode.SMS__c || !!dataNode.sms,
       SMS_Count__c: dataNode.SMS_Count__c ?? dataNode.smsCount ?? 0,
-      
+
       // WhatsApp
       WhatsApp__c: !!dataNode.WhatsApp__c || !!dataNode.whatsApp,
       WhatsApp_Count__c: dataNode.WhatsApp_Count__c ?? dataNode.whatsAppCount ?? 0,
-      
+
       // Global
       Numbers__c: !!dataNode.Numbers__c || !!dataNode.numbers,
       Numbers_Count__c: dataNode.Numbers_Count__c ?? dataNode.numbersCount ?? 0,
       Global__c: !!dataNode.Global__c || !!dataNode.global,
       Global_Count__c: dataNode.Global_Count__c ?? dataNode.globalCount ?? 0,
-      
+
       // AI Features
       AIAgents__c: dataNode.AIAgents__c ?? dataNode.aiAgents ?? 0,
       AIAssistants__c: dataNode.AIAssistants__c ?? dataNode.aiAssistants ?? 0,
@@ -1161,7 +1185,7 @@ export async function getLicenseFromSapien(
       AIAssistantsCallAllowance__c: dataNode.AIAssistantsCallAllowance__c ?? dataNode.aiAssistantsCallAllowance ?? 0,
       AIAgentsDigitalMessageAllowance__c: dataNode.AIAgentsDigitalMessageAllowance__c ?? dataNode.aiAgentsDigitalMessageAllowance ?? 0,
       AIAssistantsDigitalMessageAllowance__c: dataNode.AIAssistantsDigitalMessageAllowance__c ?? dataNode.aiAssistantsDigitalMessageAllowance ?? 0,
-      
+
       // Provisioning
       AVS_Provisioned__c: !!dataNode.AVS_Provisioned__c || !!dataNode.avsProvisioned,
       TrialExpirationDate__c: dataNode['sfLma__Expiration__c'] || dataNode.trialExpirationDate || undefined,

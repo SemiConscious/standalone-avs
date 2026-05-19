@@ -512,15 +512,15 @@ class AppSyncWsClient {
 interface AppSyncMessage {
   id?: string;
   type:
-    | 'connection_init'
-    | 'connection_ack'
-    | 'start'
-    | 'start_ack'
-    | 'data'
-    | 'error'
-    | 'complete'
-    | 'stop'
-    | 'ka';
+  | 'connection_init'
+  | 'connection_ack'
+  | 'start'
+  | 'start_ack'
+  | 'data'
+  | 'error'
+  | 'complete'
+  | 'stop'
+  | 'ka';
   payload?: Record<string, unknown>;
 }
 
@@ -573,7 +573,6 @@ function uuid(): string {
   for (let i = 0; i < 32; i++) {
     s += Math.floor(Math.random() * 16).toString(16);
   }
-  return `${s.slice(0, 8)}-${s.slice(8, 12)}-4${s.slice(13, 16)}-${
-    ((parseInt(s[16] ?? '0', 16) & 0x3) | 0x8).toString(16) + s.slice(17, 20)
-  }-${s.slice(20, 32)}`;
+  return `${s.slice(0, 8)}-${s.slice(8, 12)}-4${s.slice(13, 16)}-${((parseInt(s[16] ?? '0', 16) & 0x3) | 0x8).toString(16) + s.slice(17, 20)
+    }-${s.slice(20, 32)}`;
 }
