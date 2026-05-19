@@ -124,9 +124,8 @@ export const POST: RequestHandler = async ({ request, url }) => {
     verifiedClaims = payload;
   } catch (err) {
     throw error(401, {
-      message: `Charlie request JWT verification failed: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
+      message: `Charlie request JWT verification failed: ${err instanceof Error ? err.message : String(err)
+        }`,
     });
   }
 
@@ -206,8 +205,7 @@ async function handleFetchSipCredentials(context: Record<string, unknown>): Prom
     creds = await getWebphoneSipCredentials(sf.instanceUrl, sf.accessToken, userId);
   } catch (err) {
     console.warn(
-      `[charlie/callback] fetch_sip_credentials: SOQL failed for NBX user ${userId}: ${
-        err instanceof Error ? err.message : String(err)
+      `[charlie/callback] fetch_sip_credentials: SOQL failed for NBX user ${userId}: ${err instanceof Error ? err.message : String(err)
       }`,
     );
     return Response.json(
@@ -275,8 +273,8 @@ async function getServiceAccountSfSession(): Promise<{
   if (!clientId || !clientSecret || !username || !password) {
     console.warn(
       '[charlie/callback] service-account SF env not configured; ' +
-        'fetch_sip_credentials will return active: false. Set ' +
-        'CHARLIE_CALLBACK_SF_CLIENT_ID, _CLIENT_SECRET, _USERNAME, _PASSWORD.',
+      'fetch_sip_credentials will return active: false. Set ' +
+      'CHARLIE_CALLBACK_SF_CLIENT_ID, _CLIENT_SECRET, _USERNAME, _PASSWORD.',
     );
     return null;
   }
@@ -298,8 +296,7 @@ async function getServiceAccountSfSession(): Promise<{
     });
   } catch (err) {
     console.warn(
-      `[charlie/callback] SF service-account auth fetch failed: ${
-        err instanceof Error ? err.message : String(err)
+      `[charlie/callback] SF service-account auth fetch failed: ${err instanceof Error ? err.message : String(err)
       }`,
     );
     return null;

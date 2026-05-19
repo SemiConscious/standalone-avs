@@ -4,27 +4,40 @@
  * AWS AppSync only supports the **legacy** `graphql-ws` subprotocol
  * (the one from `subscriptions-transport-ws`), not the modern
  * `graphql-transport-ws` protocol the `graphql-ws` npm library
- * speaks. The two are wire-incompatible — graphql-ws's WS upgrade
- * closes immediately with code 1006, which is what the prior
- * implementation here did.
+ * speaks. The two are wire-incompatible.
  *
  * This module is a thin from-scratch implementation of AppSync's
  * realtime protocol — small enough to read end-to-end. Reference
  * docs: https://docs.aws.amazon.com/appsync/latest/devguide/real-time-websocket-client.html
  *
- * Wire shape:
+ * Wire shape (Lambda authorizer mode — what Charlie uses):
  *
  *   1. Connect to:
  *        wss://<api-id>.appsync-realtime-api.<region>.amazonaws.com/graphql
- *          ?header=<base64Url({ host, Authorization })>
- *          &payload=<base64Url({})>
+ *      Sec-WebSocket-Protocol: `graphql-ws`.
+ *
+ *      No URL query string — the URL-query-string `?header=...&payload=...`
+ *      auth scheme is for API_KEY / IAM / Cognito / OIDC modes only.
+ *      For `AWS_LAMBDA` authorizer mode, AppSync rejects the URL-query-
+ *      string auth with `{"errorCode":400,"message":"Required headers are
+ *      missing."}` on the first `connection_init` and expects the auth
+ *      payload to ride INSIDE the `connection_init` message instead.
+ *      This isn't documented clearly anywhere in the AppSync docs;
+ *      verified empirically against the dev03 deployment + upstream
+ *      AWS Amplify source for AWSAppSyncRealTimeProvider.
+ *
+ *   2. Send:
+ *        {
+ *          type: "connection_init",
+ *          payload: {
+ *            host: "<api-id>.appsync-api.<region>.amazonaws.com",
+ *            Authorization: "<raw-JWT>"
+ *          }
+ *        }
  *      `host` is the **HTTPS** API host (not the realtime host).
  *      `Authorization` is the raw JWT (no `Bearer ` prefix — AppSync's
  *      Lambda authorizer receives whatever string is here as
  *      `event.authorizationToken`).
- *      Sec-WebSocket-Protocol: `graphql-ws`.
- *
- *   2. Send `{ type: "connection_init" }` once open.
  *
  *   3. Receive `{ type: "connection_ack", payload: { connectionTimeoutMs } }`.
  *      Track the timeout — if no `ka` arrives within that window we
@@ -41,13 +54,13 @@
  *            }
  *          }
  *        }
- *      AppSync echoes either `start_ack` (subscription registered) or
- *      `error` (rejected — check payload.errors[]).
+ *      The per-subscription `extensions.authorization` carries the
+ *      same `{ host, Authorization }` shape; AppSync re-validates the
+ *      caller per subscription start, allowing per-subscription auth
+ *      modes if the API has multiple configured.
  *
  *   5. Receive subscription events as `{ id, type: "data", payload: { data, errors? } }`.
- *      `ka` (keep-alive) frames arrive periodically; track the last
- *      time we saw one and reconnect if `connectionTimeoutMs` elapses
- *      without one.
+ *      `ka` (keep-alive) frames arrive periodically.
  *
  *   6. Unsubscribe: send `{ id, type: "stop" }`. AppSync replies
  *      `complete` and stops sending `data` for that id.
@@ -292,17 +305,10 @@ class AppSyncWsClient {
     if (this.disposed || this.connecting) return;
     this.connecting = true;
     try {
-      const jwt = await Promise.resolve(this.config.getJwt());
-      if (this.disposed) return;
-      const apiHost = realtimeUrlToApiHost(this.config.url);
-      const headerJson = JSON.stringify({ host: apiHost, Authorization: jwt });
-      const payloadJson = JSON.stringify({});
-      const url =
-        this.config.url +
-        `?header=${base64UrlEncode(headerJson)}` +
-        `&payload=${base64UrlEncode(payloadJson)}`;
-      const socket = new WebSocket(url, ['graphql-ws']);
-      socket.addEventListener('open', () => this.onOpen(socket));
+      const socket = new WebSocket(this.config.url, ['graphql-ws']);
+      socket.addEventListener('open', () => {
+        void this.onOpen(socket);
+      });
       socket.addEventListener('message', (e: MessageEvent) => this.onMessage(socket, e));
       socket.addEventListener('close', (e: CloseEvent) =>
         this.onClose(socket, e.code, e.reason),
@@ -320,9 +326,28 @@ class AppSyncWsClient {
     this.connecting = false;
   }
 
-  private onOpen(socket: WebSocket): void {
+  private async onOpen(socket: WebSocket): Promise<void> {
     if (socket !== this.socket) return;
-    this.send({ type: 'connection_init' });
+    // For Lambda authorizer mode, AppSync requires the auth payload
+    // INSIDE the connection_init message (not via URL query string).
+    let jwt: string;
+    try {
+      jwt = await Promise.resolve(this.config.getJwt());
+    } catch (err) {
+      console.warn('[realtime] failed to read JWT for connection_init:', err);
+      try {
+        socket.close(4001, 'jwt-fetch-failed');
+      } catch {
+        // ignore
+      }
+      return;
+    }
+    if (socket !== this.socket) return; // disposed during await
+    const apiHost = realtimeUrlToApiHost(this.config.url);
+    this.send({
+      type: 'connection_init',
+      payload: { host: apiHost, Authorization: jwt },
+    });
     if (this.connectAckTimer) clearTimeout(this.connectAckTimer);
     this.connectAckTimer = setTimeout(() => {
       console.warn('[realtime] AppSync connection_ack timed out after', CONNECT_ACK_TIMEOUT_MS, 'ms');
@@ -544,19 +569,6 @@ function realtimeUrlToApiHost(realtimeUrl: string): string {
   }
 }
 
-/**
- * Browser-safe base64Url encoder for the AppSync URL params. We can't
- * use Node's `Buffer` here; this runs in the browser. `btoa` only
- * handles ASCII — UTF-8 inputs need the TextEncoder dance first.
- */
-function base64UrlEncode(input: string): string {
-  const bytes = new TextEncoder().encode(input);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]!);
-  }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
 
 /**
  * Tiny RFC-4122 v4 UUID. Subscription ids are opaque to AppSync — any
