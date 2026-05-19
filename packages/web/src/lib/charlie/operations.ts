@@ -1,25 +1,24 @@
 /**
- * Typed GraphQL operations against Charlie. Kept as exported `gql` strings
- * (rather than ASTs) so they can be hand-written without a codegen step in
- * Phase 0; we'll generate types from Charlie's published schema once the
- * dust settles.
+ * Typed GraphQL operations against Charlie.
  *
- * Phase 0 (the original set):
+ * Phase 0 (boot + agent + events):
  *   - `getMediaTransport` (boot the SIP UA)
  *   - `getAgentState` / `setAvailability` / `wrapupComplete` (agent widget)
- *   - call-control mutations + the two CallEvent subscriptions
+ *   - the two CallEvent subscriptions for cross-device sync /
+ *     observability
  *
- * Phase B.3 follow-up (Tier 1 — read-side data-plane migration):
+ * Phase B.3 (Tier 1 — read-side data-plane migration):
  *   Per-domain `list*` + `get*` queries the SvelteKit page-server loaders
  *   call to populate /users, /groups, /devices, /phone-numbers,
  *   /routing-policies, /call-logs. Backed by `@charlie/adapters-sapien`
  *   when the dispatcher Lambda has `CHARLIE_ADAPTER=sapien`.
  *
- *   Mutations (create/update/delete) live in the existing SF SOQL adapters
- *   for now — the corresponding Charlie resolvers are NOT_IMPLEMENTED
- *   pending the Sapien-team conversation in
- *   `charlie-api/docs/CONTINUATION_PROMPT.md` ("Open Sapien-team
- *   questions").
+ * Phase B.5 (SIP-driven pivot — May 2026):
+ *   SIP-layer call-control mutations (dial / answer / hangup / hold /
+ *   unhold / mute / unmute / sendDtmf / blindTransfer / attendedTransfer*)
+ *   moved out of Charlie's GraphQL surface. The webphone widget drives
+ *   those directly via JsSIP against `webphoned`. See
+ *   `charlie-api/docs/CTI_INTEGRATION.md`.
  */
 
 import { gql } from 'graphql-request';
@@ -159,158 +158,9 @@ export const OnAgentStateChangedSubscription = gql`
 `;
 
 // =============================================================================
-// Call control
+// Call events (subscriptions only — SIP-layer call control happens
+// via JsSIP in the webphone widget; see Phase B.5 note above)
 // =============================================================================
-
-export const DialMutation = gql`
-  mutation Dial($input: DialInput!) {
-    dial(input: $input) {
-      correlationId
-      accepted
-      call {
-        id
-        state
-        direction
-      }
-      errors {
-        code
-        description
-      }
-    }
-  }
-`;
-
-export const AnswerMutation = gql`
-  mutation Answer($input: AnswerInput!) {
-    answer(input: $input) {
-      correlationId
-      accepted
-      call {
-        id
-        state
-      }
-      errors {
-        code
-        description
-      }
-    }
-  }
-`;
-
-export const HangupMutation = gql`
-  mutation Hangup($input: HangupInput!) {
-    hangup(input: $input) {
-      correlationId
-      accepted
-      call {
-        id
-        state
-      }
-      errors {
-        code
-        description
-      }
-    }
-  }
-`;
-
-export const HoldMutation = gql`
-  mutation Hold($input: HoldInput!) {
-    hold(input: $input) {
-      correlationId
-      accepted
-      call {
-        id
-        state
-      }
-      errors {
-        code
-        description
-      }
-    }
-  }
-`;
-
-export const UnholdMutation = gql`
-  mutation Unhold($input: UnholdInput!) {
-    unhold(input: $input) {
-      correlationId
-      accepted
-      call {
-        id
-        state
-      }
-      errors {
-        code
-        description
-      }
-    }
-  }
-`;
-
-export const MuteMutation = gql`
-  mutation Mute($input: MuteInput!) {
-    mute(input: $input) {
-      correlationId
-      accepted
-      call {
-        id
-        state
-      }
-      errors {
-        code
-        description
-      }
-    }
-  }
-`;
-
-export const UnmuteMutation = gql`
-  mutation Unmute($input: UnmuteInput!) {
-    unmute(input: $input) {
-      correlationId
-      accepted
-      call {
-        id
-        state
-      }
-      errors {
-        code
-        description
-      }
-    }
-  }
-`;
-
-export const SendDtmfMutation = gql`
-  mutation SendDtmf($input: SendDtmfInput!) {
-    sendDtmf(input: $input) {
-      correlationId
-      accepted
-      errors {
-        code
-        description
-      }
-    }
-  }
-`;
-
-export const BlindTransferMutation = gql`
-  mutation BlindTransfer($input: BlindTransferInput!) {
-    blindTransfer(input: $input) {
-      correlationId
-      accepted
-      call {
-        id
-        state
-      }
-      errors {
-        code
-        description
-      }
-    }
-  }
-`;
 
 export const OnCallEventSubscription = gql`
   subscription OnCallEvent($userId: Int, $callId: ID) {

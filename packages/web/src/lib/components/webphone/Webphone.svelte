@@ -1,15 +1,21 @@
 <!--
-  Webphone toolbar — Phase 0 skeleton. Embedded in the layout so it lives
-  on every page; pinned bottom-right.
+  Webphone toolbar — pinned bottom-right of every page.
 
-  Responsibilities:
-    - Boot the Charlie browser JWT + `getMediaTransport` query on mount.
-    - Construct + start a WebphoneClient.
-    - Subscribe to `onCallEvent` and reconcile against the local call-leg map.
-    - Render per-leg controls: dial, answer, hangup, hold/unhold, mute/unmute, DTMF.
-    - Issue the corresponding Charlie mutation on button click.
+  Architecture (post Phase B.5 SIP-driven pivot — see
+  `charlie-api/docs/CTI_INTEGRATION.md` and `charlie-api/docs/WEBPHONE.md`):
 
-  See `charlie-api/docs/WEBPHONE.md` §4 for the architecture + state model.
+    - **Bootstrap**: ask Charlie for a browser JWT (`/api/charlie/jwt`)
+      and the SIP credentials (`getMediaTransport` GraphQL query).
+    - **SIP UA**: configure + start a `WebphoneClient` (JsSIP UA
+      pointed at `webphoned`).
+    - **Per-call control**: button clicks (dial / hangup / hold /
+      mute / DTMF) drive the local SIP UA directly via
+      `WebphoneClient` methods. Charlie's GraphQL is NOT in the per-
+      call hot path — it only handles bootstrap + events fan-out.
+    - **Events fan-out**: subscribe to Charlie's `onCallEvent` for
+      cross-device sync (e.g. another agent supervises this call;
+      another tab also has the webphone open). The events worker
+      drives this from the user-WS push stream.
 -->
 
 <script lang="ts">
@@ -53,7 +59,7 @@
   let unsubscribeWpEvents: (() => void) | null = null;
   let dialDestination = $state('');
   let bootError = $state<string | null>(null);
-  let pendingOutboundCorrelationIds = new Set<string>();
+  let isRegistered = $state(false);
 
   // Wire stores to local reactive state.
   let legs = $state<readonly CallLeg[]>([]);
@@ -149,110 +155,83 @@
   });
 
   // ---------------------------------------------------------------------------
-  // Charlie mutation handlers
+  // SIP-driven button handlers — drive the local JsSIP UA directly.
+  // No Charlie GraphQL mutation in the per-call hot path.
   // ---------------------------------------------------------------------------
 
-  async function dial(): Promise<void> {
-    if (!charlieClient || !dialDestination.trim()) return;
+  function dial(): void {
+    if (!webphoneClient || !dialDestination.trim()) return;
+    if (!isRegistered) {
+      console.warn('[webphone] dial pressed before SIP REGISTER 200 — ignoring');
+      return;
+    }
     const correlationId = uuid();
-    pendingOutboundCorrelationIds.add(correlationId);
+    const target = dialDestination.trim();
+    let sipSessionId: string;
+    try {
+      sipSessionId = webphoneClient.dial(target);
+    } catch (err) {
+      console.error('[webphone] dial failed', err);
+      bootError = err instanceof Error ? err.message : String(err);
+      return;
+    }
     upsertCallLeg(() => ({
-      id: correlationId,
+      id: sipSessionId,
       correlationId,
+      sipSessionId,
       state: 'DIALING',
       direction: 'OUTBOUND',
       from: null,
-      to: dialDestination,
+      to: target,
       muted: false,
       startedAt: Date.now(),
       endedAt: null,
       cause: null,
     }));
+    dialDestination = '';
+  }
 
-    try {
-      type DialResponse = {
-        dial: { call: { id: string; state: string; direction: string } | null; accepted: boolean };
-      };
-      const result = await charlieClient.request<DialResponse>(CharlieOperations.DialMutation, {
-        input: { destination: dialDestination, correlationId },
-      });
-      const callId = result.dial.call?.id ?? correlationId;
-      upsertCallLeg((current) => ({
-        ...(current ?? {
-          id: callId,
-          correlationId,
-          state: 'INITIATED',
-          direction: 'OUTBOUND',
-          from: null,
-          to: dialDestination,
-          muted: false,
-          startedAt: Date.now(),
-          endedAt: null,
-          cause: null,
-        }),
-        id: callId,
-        state: result.dial.accepted ? 'INITIATED' : 'HUNGUP',
-      }));
-      dialDestination = '';
-    } catch (err) {
-      console.error('[webphone] dial failed', err);
-      setCallLegState(correlationId, 'HUNGUP');
+  function answer(leg: CallLeg): void {
+    if (!webphoneClient || !leg.sipSessionId) return;
+    webphoneClient.acceptInbound(leg.sipSessionId);
+  }
+
+  function hangup(leg: CallLeg): void {
+    if (!webphoneClient) return;
+    if (leg.state === 'RINGING' && leg.direction === 'INBOUND' && leg.sipSessionId) {
+      // Reject a ringing inbound call with a 486 final response — that
+      // is the SIP-correct way to refuse a call (so the upstream
+      // dialer hears "busy" rather than a normal-clearing tone).
+      webphoneClient.rejectInbound(leg.sipSessionId);
+      return;
+    }
+    if (leg.sipSessionId) {
+      webphoneClient.hangupSession(leg.sipSessionId);
     }
   }
 
-  async function answer(leg: CallLeg): Promise<void> {
-    if (!charlieClient) return;
-    try {
-      await charlieClient.request(CharlieOperations.AnswerMutation, {
-        input: { callId: leg.id },
-      });
-    } catch (err) {
-      console.error('[webphone] answer failed', err);
+  function toggleHold(leg: CallLeg): void {
+    if (!webphoneClient || !leg.sipSessionId) return;
+    if (leg.state === 'HELD') {
+      webphoneClient.unhold(leg.sipSessionId);
+    } else {
+      webphoneClient.hold(leg.sipSessionId);
     }
   }
 
-  async function hangup(leg: CallLeg): Promise<void> {
-    if (!charlieClient) return;
-    try {
-      await charlieClient.request(CharlieOperations.HangupMutation, {
-        input: { callId: leg.id },
-      });
-    } catch (err) {
-      console.error('[webphone] hangup failed', err);
+  function toggleMute(leg: CallLeg): void {
+    if (!webphoneClient || !leg.sipSessionId) return;
+    if (leg.muted) {
+      webphoneClient.unmute(leg.sipSessionId);
+    } else {
+      webphoneClient.mute(leg.sipSessionId);
     }
+    upsertCallLeg((current) => ({ ...(current ?? leg), muted: !leg.muted }));
   }
 
-  async function toggleHold(leg: CallLeg): Promise<void> {
-    if (!charlieClient) return;
-    const op =
-      leg.state === 'HELD' ? CharlieOperations.UnholdMutation : CharlieOperations.HoldMutation;
-    try {
-      await charlieClient.request(op, { input: { callId: leg.id } });
-    } catch (err) {
-      console.error('[webphone] hold toggle failed', err);
-    }
-  }
-
-  async function toggleMute(leg: CallLeg): Promise<void> {
-    if (!charlieClient) return;
-    const op = leg.muted ? CharlieOperations.UnmuteMutation : CharlieOperations.MuteMutation;
-    try {
-      await charlieClient.request(op, { input: { callId: leg.id } });
-      upsertCallLeg((current) => ({ ...(current ?? leg), muted: !leg.muted }));
-    } catch (err) {
-      console.error('[webphone] mute toggle failed', err);
-    }
-  }
-
-  async function sendDtmfDigit(leg: CallLeg, digit: string): Promise<void> {
-    if (!charlieClient) return;
-    try {
-      await charlieClient.request(CharlieOperations.SendDtmfMutation, {
-        input: { callId: leg.id, digits: digit },
-      });
-    } catch (err) {
-      console.error('[webphone] dtmf failed', err);
-    }
+  function sendDtmfDigit(leg: CallLeg, digit: string): void {
+    if (!webphoneClient || !leg.sipSessionId) return;
+    webphoneClient.sendDtmf(leg.sipSessionId, digit);
   }
 
   // ---------------------------------------------------------------------------
@@ -277,81 +256,75 @@
     | { __typename: 'CallHungupEvent'; callId: string; cause: string }
     | { __typename: 'CallDtmfEvent'; callId: string };
 
+  /**
+   * Charlie's `onCallEvent` arrives keyed by the **Sapien call id**
+   * (FreeSWITCH UUID). The local SIP UA's leg map is keyed by the
+   * **JsSIP session id**. The two id spaces don't align in this
+   * phase — correlating them is a known follow-up (likely via the
+   * SIP Call-ID header on the outbound INVITE, which propagates
+   * through to FreeSWITCH and becomes part of the SapienCall record).
+   *
+   * For now this handler only logs. The local SIP events drive the
+   * UI's leg list. Cross-device sync (another tab, supervisor
+   * listenIn etc.) will land when correlation is implemented.
+   */
   function handleCallEvent(ev: CallEventPayload): void {
-    switch (ev.__typename) {
-      case 'CallRingingEvent': {
-        upsertCallLeg((current) => ({
-          ...(current ?? {
-            id: ev.callId,
-            correlationId: ev.callId,
-            state: 'RINGING',
-            direction: ev.direction,
-            from: ev.from,
-            to: ev.to,
-            muted: false,
-            startedAt: Date.now(),
-            endedAt: null,
-            cause: null,
-          }),
-          id: ev.callId,
-          state: 'RINGING',
-          direction: ev.direction,
-          from: ev.from,
-          to: ev.to,
-        }));
-        return;
-      }
-      case 'CallProgressEvent':
-        setCallLegState(ev.callId, 'RINGING');
-        return;
-      case 'CallAnsweredEvent':
-        setCallLegState(ev.callId, 'CONNECTED');
-        return;
-      case 'CallHeldEvent':
-        setCallLegState(ev.callId, 'HELD');
-        return;
-      case 'CallUnheldEvent':
-        setCallLegState(ev.callId, 'CONNECTED');
-        return;
-      case 'CallMutedEvent':
-        upsertCallLeg((current) => ({ ...(current as CallLeg), id: ev.callId, muted: true }));
-        return;
-      case 'CallUnmutedEvent':
-        upsertCallLeg((current) => ({ ...(current as CallLeg), id: ev.callId, muted: false }));
-        return;
-      case 'CallHungupEvent':
-        upsertCallLeg((current) => ({
-          ...(current as CallLeg),
-          id: ev.callId,
-          state: 'HUNGUP',
-          endedAt: Date.now(),
-          cause: ev.cause,
-        }));
-        // Drop after 5s so the UI shows the cause briefly.
-        setTimeout(() => removeCallLeg(ev.callId), 5000);
-        return;
-      default:
-        // Transfers / DTMF / progress refinements — Phase 1.
-        return;
-    }
+    console.debug('[webphone] charlie onCallEvent', ev.__typename, 'callId=', ev.callId);
   }
 
   function handleWebphoneEvent(ev: WebphoneClientEvent): void {
     switch (ev.type) {
-      case 'inbound-session':
-        // Auto-answer if this matches a recent outbound dial — Charlie originated
-        // a leg toward our SIP URI. Otherwise, do nothing: the UI's answer button
-        // (driven by `Subscription.onCallEvent`) will be the user's way in.
-        if (pendingOutboundCorrelationIds.size > 0) {
-          webphoneClient?.acceptInbound(ev.sessionId);
-        }
+      case 'register-ok':
+        isRegistered = true;
+        return;
+      case 'register-failed':
+      case 'unregistered':
+        isRegistered = false;
+        return;
+      case 'inbound-session': {
+        // A new ringing leg arrived from webphoned. Create a local
+        // CallLeg keyed off the SIP session id; the user's "Answer"
+        // button click will fire `acceptInbound` directly.
+        upsertCallLeg(() => ({
+          id: ev.sessionId,
+          correlationId: ev.sessionId,
+          sipSessionId: ev.sessionId,
+          state: 'RINGING',
+          direction: 'INBOUND',
+          from: ev.from,
+          to: null,
+          muted: false,
+          startedAt: Date.now(),
+          endedAt: null,
+          cause: null,
+        }));
+        return;
+      }
+      case 'outbound-session':
+        // Already created the leg in dial() — nothing more to do.
+        return;
+      case 'session-progress':
+        setCallLegState(ev.sessionId, 'RINGING');
+        return;
+      case 'session-accepted':
+      case 'session-confirmed':
+        setCallLegState(ev.sessionId, 'CONNECTED');
         return;
       case 'session-ended':
-      case 'session-failed':
-        // The Charlie subscription will tell us the same story via CallHungupEvent.
-        // Nothing to do here other than log.
-        console.info(`[webphone] SIP session ${ev.sessionId} ended/failed: ${ev.cause}`);
+      case 'session-failed': {
+        upsertCallLeg((current) => ({
+          ...(current as CallLeg),
+          id: ev.sessionId,
+          state: 'HUNGUP',
+          endedAt: Date.now(),
+          cause: ev.cause,
+        }));
+        // Drop after 5s so the UI shows the cause briefly. Charlie's
+        // CallHungupEvent will likely arrive on the same id and is
+        // safely deduped by upsertCallLeg.
+        setTimeout(() => removeCallLeg(ev.sessionId), 5000);
         return;
+      }
       default:
         return;
     }
@@ -390,7 +363,7 @@
       placeholder="+44…"
       aria-label="Destination number"
     />
-    <button type="submit" disabled={!charlieClient || !dialDestination.trim()}>Dial</button>
+    <button type="submit" disabled={!isRegistered || !dialDestination.trim()}>Dial</button>
   </form>
 
   {#if legs.length === 0}
