@@ -229,6 +229,16 @@ class AppSyncWsClient {
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
+  /**
+   * Set true when AppSync sends a `connection_error` on the current
+   * socket. Consumed in `scheduleReconnect`: a connection-level
+   * rejection (e.g. expired JWT, malformed auth payload) re-tripping
+   * the same auth path on every retry is a tight death-spiral, so we
+   * stop reconnecting and surface the error to the operator. Cleared
+   * on every fresh `connect()` so the consumer can drive a re-auth
+   * via `configureRealtimeClient`.
+   */
+  private connectionRejected = false;
 
   /** Subscriptions registered by the caller. Survives reconnects. */
   private readonly subscriptions = new Map<string, AppSyncSubscriptionEntry>();
@@ -304,6 +314,7 @@ class AppSyncWsClient {
   private async connect(): Promise<void> {
     if (this.disposed || this.connecting) return;
     this.connecting = true;
+    this.connectionRejected = false;
     try {
       const socket = new WebSocket(this.config.url, ['graphql-ws']);
       socket.addEventListener('open', () => {
@@ -411,16 +422,41 @@ class AppSyncWsClient {
         }
         return;
       }
-      case 'error': {
-        // Top-level error (auth failure during connect, or a per-subscription error).
+      case 'error':
+      case 'connection_error': {
+        // AppSync sends `connection_error` for auth/protocol failures
+        // during the connect handshake, and `error` for per-subscription
+        // failures after `connection_ack`. The payload shape is
+        // `{ errors: [{ message, errorCode? }] }` in both cases — we
+        // surface them through the same path. Earlier revisions only
+        // handled `error`, which left `connection_error` falling
+        // through to the silent-default branch and AppSync then
+        // closing the socket cleanly (1000). The reconnect loop
+        // re-tripped the same auth error every time; the symptom was
+        // a parade of "[webphone] graphql-ws closed: 1000" with zero
+        // diagnostic context.
         const entry = msg.id ? this.subscriptions.get(msg.id) : undefined;
-        const errs = (msg.payload as { errors?: { message: string }[] } | undefined)?.errors;
-        const message = errs?.map((e) => e.message).join('; ') ?? 'AppSync error';
+        const errs = (msg.payload as
+          | { errors?: { message: string; errorCode?: number | string }[] }
+          | undefined)?.errors;
+        const message =
+          errs && errs.length > 0
+            ? errs
+              .map((e) =>
+                e.errorCode != null ? `[${e.errorCode}] ${e.message}` : e.message,
+              )
+              .join('; ')
+            : `AppSync ${msg.type}`;
         if (entry && !entry.disposed) {
           entry.handlers.error(new Error(message));
         } else {
-          // Connection-level — surface via console; reconnect on close.
-          console.warn('[realtime] AppSync error:', message);
+          console.warn(`[realtime] AppSync ${msg.type}:`, message);
+        }
+        // For connection-level errors, AppSync immediately closes the
+        // socket with code 1000; suppressing the reconnect cuts the
+        // tight loop. We use a poison flag the close handler reads.
+        if (msg.type === 'connection_error') {
+          this.connectionRejected = true;
         }
         return;
       }
@@ -433,8 +469,13 @@ class AppSyncWsClient {
         }
         return;
       }
-      default:
+      default: {
+        // Forward-compat: log unknown message types instead of dropping
+        // them silently. AppSync occasionally adds new control messages
+        // (e.g. `keep_alive`) and we want to find out before they bite.
+        console.warn('[realtime] AppSync unknown message type:', msg.type, msg.payload);
         return;
+      }
     }
   }
 
@@ -461,6 +502,15 @@ class AppSyncWsClient {
 
   private scheduleReconnect(reason: string): void {
     if (this.disposed) return;
+    if (this.connectionRejected) {
+      console.warn(
+        '[realtime] AppSync rejected the connection (auth/protocol-level); ' +
+        'not reconnecting. Reload the page or call configureRealtimeClient ' +
+        'with a fresh JWT.',
+        { reason },
+      );
+      return;
+    }
     if (this.reconnectAttempts >= RECONNECT_MAX_ATTEMPTS) {
       console.warn('[realtime] giving up after', this.reconnectAttempts, 'reconnect attempts:', reason);
       return;
@@ -539,6 +589,12 @@ interface AppSyncMessage {
   type:
   | 'connection_init'
   | 'connection_ack'
+  // AppSync sends `connection_error` for handshake-time auth/protocol
+  // failures on the realtime endpoint. Spelled separately from `error`
+  // (which is per-subscription) — the legacy graphql-ws subprotocol
+  // distinguishes "the whole connection is dead" from "this one
+  // subscription failed".
+  | 'connection_error'
   | 'start'
   | 'start_ack'
   | 'data'
