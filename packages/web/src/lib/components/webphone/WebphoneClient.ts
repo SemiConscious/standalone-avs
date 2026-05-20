@@ -177,6 +177,55 @@ export class WebphoneClient {
       'X-RegCount: 1',
     ]);
 
+    // Workaround: webphoned's REGISTER 200 OK echoes its B2BUA-internal
+    // address in the `Contact` header (e.g. `<sip:100.110.4.96:10062;
+    // transport=udp>`) instead of the binding it just registered for
+    // us, in violation of RFC 3261 §10.2.4. JsSIP's strict registrator
+    // looks for OUR Contact's user in the response Contacts and
+    // silently ignores 200 OK when no match is found — the UI gets
+    // stuck on "REGISTERING" forever despite a successful SIP REGISTER.
+    //
+    // Confirmed this is intentional in the legacy AVS Lightning
+    // webphone (`platform-webphone-web/lib/rmwebphone.js`) — that
+    // hand-rolled SIP stack doesn't enforce the Contact-match check.
+    //
+    // Workaround approach: blank the UA contact URI's `_user` field
+    // around each REGISTER cycle. Webphoned's response Contact has
+    // no user part (`element.uri.user === undefined`); blanking ours
+    // makes the strict-equality check pass (`undefined === undefined`).
+    // We restore `_user` after the register settles so:
+    //
+    //   (a) the outgoing Contact header on the wire stays unchanged
+    //       (the registrator caches the Contact as a string at
+    //       construction time, before we touch `_user`), and
+    //
+    //   (b) inbound INVITEs validate correctly — UA.js#receiveRequest
+    //       compares `request.ruri.user` against `_contact.uri.user`,
+    //       and we need that to be the random Contact user webphoned
+    //       used as the binding URI when proxying the call.
+    //
+    // This patch is scoped: only `register()` is wrapped, and the
+    // override window is the request/response window (typically
+    // <500ms). Inbound INVITEs landing inside that window are rare;
+    // they'd 404 here and webphoned would retry — acceptable.
+    type UriWithUser = { _user?: string };
+    type RegistratorWithRegister = { register: () => unknown };
+    const reg = ua.registrator() as unknown as RegistratorWithRegister;
+    const origRegister = reg.register.bind(reg);
+    const contactUri = ua.contact.uri as UriWithUser;
+    reg.register = function patchedRegister(): unknown {
+      const savedUser = contactUri._user;
+      contactUri._user = undefined;
+      const restore = (): void => {
+        contactUri._user = savedUser;
+        ua.removeListener('registered', restore);
+        ua.removeListener('registrationFailed', restore);
+      };
+      ua.on('registered', restore);
+      ua.on('registrationFailed', restore);
+      return origRegister();
+    };
+
     // WebSocket-level connectivity diagnostics. Without these we
     // can't distinguish "WSS handshake failed" from "WSS connected
     // but webphoned didn't reply to REGISTER". Both manifest as
