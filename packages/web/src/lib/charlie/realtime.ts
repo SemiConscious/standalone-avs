@@ -316,9 +316,41 @@ class AppSyncWsClient {
     this.connecting = true;
     this.connectionRejected = false;
     try {
-      const socket = new WebSocket(this.config.url, ['graphql-ws']);
+      // AppSync's WebSocket auth is set in the URL query string at
+      // handshake time — `?header=<base64(headersJson)>&payload=<base64("{}")>`.
+      // For AWS_LAMBDA authorizer mode the headers JSON carries
+      // `{ host: <api-host>, Authorization: <raw-jwt> }`; the payload
+      // value is always base64-encoded `'{}'`.
+      //
+      // Earlier revisions tried sending the auth inside the
+      // `connection_init` message body — that's the schema some
+      // graphql-ws spec libraries use, but AppSync rejects it with
+      // `connection_error: [400] Required headers are missing.`
+      // because it inspects the URL query string at the WS handshake
+      // gate, before any application-layer messages are read. The
+      // `connection_init` body for AppSync is therefore an empty
+      // `{ type: 'connection_init' }`.
+      let jwt: string;
+      try {
+        jwt = await Promise.resolve(this.config.getJwt());
+      } catch (err) {
+        this.connecting = false;
+        this.scheduleReconnect(
+          `failed to read JWT for handshake: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return;
+      }
+      const apiHost = realtimeUrlToApiHost(this.config.url);
+      const headerJson = JSON.stringify({ host: apiHost, Authorization: jwt });
+      const headerB64 = base64Encode(headerJson);
+      const payloadB64 = base64Encode('{}');
+      const wsUrl =
+        this.config.url +
+        (this.config.url.includes('?') ? '&' : '?') +
+        `header=${encodeURIComponent(headerB64)}&payload=${encodeURIComponent(payloadB64)}`;
+      const socket = new WebSocket(wsUrl, ['graphql-ws']);
       socket.addEventListener('open', () => {
-        void this.onOpen(socket);
+        this.onOpen(socket);
       });
       socket.addEventListener('message', (e: MessageEvent) => this.onMessage(socket, e));
       socket.addEventListener('close', (e: CloseEvent) =>
@@ -337,28 +369,12 @@ class AppSyncWsClient {
     this.connecting = false;
   }
 
-  private async onOpen(socket: WebSocket): Promise<void> {
+  private onOpen(socket: WebSocket): void {
     if (socket !== this.socket) return;
-    // For Lambda authorizer mode, AppSync requires the auth payload
-    // INSIDE the connection_init message (not via URL query string).
-    let jwt: string;
-    try {
-      jwt = await Promise.resolve(this.config.getJwt());
-    } catch (err) {
-      console.warn('[realtime] failed to read JWT for connection_init:', err);
-      try {
-        socket.close(4001, 'jwt-fetch-failed');
-      } catch {
-        // ignore
-      }
-      return;
-    }
-    if (socket !== this.socket) return; // disposed during await
-    const apiHost = realtimeUrlToApiHost(this.config.url);
-    this.send({
-      type: 'connection_init',
-      payload: { host: apiHost, Authorization: jwt },
-    });
+    // Auth already shipped in the URL query string at handshake; the
+    // connection_init message is just a no-payload trigger that asks
+    // AppSync for the connection_ack response.
+    this.send({ type: 'connection_init' });
     if (this.connectAckTimer) clearTimeout(this.connectAckTimer);
     this.connectAckTimer = setTimeout(() => {
       console.warn('[realtime] AppSync connection_ack timed out after', CONNECT_ACK_TIMEOUT_MS, 'ms');
@@ -616,6 +632,18 @@ interface AppSyncMessage {
  * realtime and API endpoints — pass the custom domain through
  * unchanged.
  */
+/**
+ * Standard base64-encode a UTF-8 string. Used to build AppSync's
+ * `?header=…&payload=…` query string. Browsers' native `btoa` only
+ * accepts Latin-1 — JWTs are ASCII so this works for the Authorization
+ * field, but we wrap in `unescape(encodeURIComponent(...))` for safety
+ * if any header value ever contains non-ASCII (host names are ASCII
+ * by IDNA, so in practice this is belt-and-braces).
+ */
+function base64Encode(value: string): string {
+  return btoa(unescape(encodeURIComponent(value)));
+}
+
 function realtimeUrlToApiHost(realtimeUrl: string): string {
   try {
     const u = new URL(realtimeUrl);
