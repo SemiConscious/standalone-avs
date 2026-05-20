@@ -133,6 +133,35 @@ export class WebphoneClient {
       user_agent: 'Charlie-Webphone/0.1',
     });
 
+    // Natterbox webphoned uses a custom `X-Auth` SIP header carrying a
+    // base64-encoded password — NOT standard SIP digest auth. Without
+    // this header webphoned silently drops the REGISTER (no 401
+    // challenge, no error response) and JsSIP times out after 32s.
+    //
+    // Confirmed against the legacy AVS Lightning webphone
+    // (`redmatter/platform-webphone-web/lib/rmwebphone.js`):
+    //
+    //   var headers = [
+    //     {name: 'X-Auth',     value: btoa(this.password)},
+    //     {name: 'X-RegCount', value: ++this.regCount},
+    //     ...
+    //   ];
+    //
+    // We use `registrator.setExtraHeaders()` (rather than
+    // `register({extraHeaders})`) so the header persists across
+    // automatic re-registrations — passing extraHeaders on the
+    // initial `register()` call is a known JsSIP bug
+    // (versatica/JsSIP#174) where the value is dropped on
+    // re-registers.
+    //
+    // The standard `password` field is still set on the UA so JsSIP
+    // can respond to a SIP digest 401 challenge if webphoned ever
+    // sends one, but webphoned's current protocol relies on X-Auth
+    // exclusively.
+    ua.registrator().setExtraHeaders([
+      `X-Auth: ${btoa(transport.sipPassword)}`,
+    ]);
+
     ua.on('registered', () => {
       setWebphoneStatus({ registration: 'REGISTERED', lastError: null });
       this.dispatch({ type: 'register-ok' });
