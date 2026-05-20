@@ -121,6 +121,15 @@ export class WebphoneClient {
       overrideWsUrl: overrideWsUrl ?? null,
     });
 
+    // Enable JsSIP's verbose debug logging when the webphone is
+    // actively being debugged. Off by default — flip via a query
+    // param so we don't leak SIP traffic to the production console.
+    const debugEnabled =
+      typeof window !== 'undefined' && /[?&]webphoneDebug=1\b/.test(window.location.search);
+    if (debugEnabled) {
+      JsSIP.debug.enable('JsSIP:*');
+    }
+
     const socket = new JsSIP.WebSocketInterface(wsUrl);
     const ua = new JsSIP.UA({
       uri: transport.sipUri,
@@ -133,36 +142,60 @@ export class WebphoneClient {
       user_agent: 'Charlie-Webphone/0.1',
     });
 
-    // Natterbox webphoned uses a custom `X-Auth` SIP header carrying a
-    // base64-encoded password — NOT standard SIP digest auth. Without
-    // this header webphoned silently drops the REGISTER (no 401
-    // challenge, no error response) and JsSIP times out after 32s.
-    //
-    // Confirmed against the legacy AVS Lightning webphone
-    // (`redmatter/platform-webphone-web/lib/rmwebphone.js`):
+    // Natterbox webphoned's custom REGISTER auth scheme — see the
+    // legacy AVS Lightning webphone for the canonical shape
+    // (`redmatter/platform-webphone-web/lib/rmwebphone.js#txReg`):
     //
     //   var headers = [
-    //     {name: 'X-Auth',     value: btoa(this.password)},
-    //     {name: 'X-RegCount', value: ++this.regCount},
-    //     ...
+    //     {name: 'X-BrowserUserAgent', value: ostd_browser_user_agent},
+    //     {name: 'X-Client',           value: '<browser> <version> <platform> <regInt>'},
+    //     {name: 'X-Auth',             value: btoa(this.password)},
+    //     {name: 'X-CallTime',         value: callTime},
+    //     {name: 'X-RegCount',         value: ++this.regCount},
+    //     {name: 'Expires',            value: 900},
     //   ];
     //
-    // We use `registrator.setExtraHeaders()` (rather than
-    // `register({extraHeaders})`) so the header persists across
-    // automatic re-registrations — passing extraHeaders on the
-    // initial `register()` call is a known JsSIP bug
-    // (versatica/JsSIP#174) where the value is dropped on
-    // re-registers.
+    // X-Auth is the only header webphoned actually validates for
+    // auth, but the legacy protocol expects the full bundle as a
+    // matter of liveness (the SIP RFC discourages unknown headers
+    // from causing failures, but webphoned's hand-rolled SIP parser
+    // may be stricter than the spec).
     //
-    // The standard `password` field is still set on the UA so JsSIP
-    // can respond to a SIP digest 401 challenge if webphoned ever
-    // sends one, but webphoned's current protocol relies on X-Auth
-    // exclusively.
+    // We use `registrator.setExtraHeaders()` rather than passing
+    // them to `register()` so they persist across automatic
+    // re-registrations (versatica/JsSIP#174 drops options on
+    // re-register).
+    const browserUa =
+      typeof navigator !== 'undefined' && typeof navigator.userAgent === 'string'
+        ? navigator.userAgent
+        : 'unknown';
     ua.registrator().setExtraHeaders([
       `X-Auth: ${btoa(transport.sipPassword)}`,
+      `X-BrowserUserAgent: ${browserUa.replace(/[^\x20-\x7e]/g, '?')}`,
+      `X-Client: Charlie-Webphone 0.1 ${browserUa.replace(/[^\x20-\x7e]/g, '?')} 0`,
+      'X-CallTime: 0',
+      'X-RegCount: 1',
     ]);
 
+    // WebSocket-level connectivity diagnostics. Without these we
+    // can't distinguish "WSS handshake failed" from "WSS connected
+    // but webphoned didn't reply to REGISTER". Both manifest as
+    // "stuck on REGISTERING" in the UI.
+    ua.on('connecting', () => {
+      console.info('[webphone] JsSIP WSS connecting');
+    });
+    ua.on('connected', () => {
+      console.info('[webphone] JsSIP WSS connected');
+    });
+    ua.on('disconnected', (event: { code?: number; reason?: string; error?: boolean } = {}) => {
+      console.warn('[webphone] JsSIP WSS disconnected', {
+        code: event.code,
+        reason: event.reason,
+        error: event.error,
+      });
+    });
     ua.on('registered', () => {
+      console.info('[webphone] JsSIP REGISTER 200 OK');
       setWebphoneStatus({ registration: 'REGISTERED', lastError: null });
       this.dispatch({ type: 'register-ok' });
     });
