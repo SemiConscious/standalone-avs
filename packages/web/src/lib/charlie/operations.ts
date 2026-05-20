@@ -1,25 +1,24 @@
 /**
- * Typed GraphQL operations against Charlie. Kept as exported `gql` strings
- * (rather than ASTs) so they can be hand-written without a codegen step in
- * Phase 0; we'll generate types from Charlie's published schema once the
- * dust settles.
+ * Typed GraphQL operations against Charlie.
  *
- * Phase 0 (the original set):
+ * Phase 0 (boot + agent + events):
  *   - `getMediaTransport` (boot the SIP UA)
  *   - `getAgentState` / `setAvailability` / `wrapupComplete` (agent widget)
- *   - call-control mutations + the two CallEvent subscriptions
+ *   - the two CallEvent subscriptions for cross-device sync /
+ *     observability
  *
- * Phase B.3 follow-up (Tier 1 — read-side data-plane migration):
+ * Phase B.3 (Tier 1 — read-side data-plane migration):
  *   Per-domain `list*` + `get*` queries the SvelteKit page-server loaders
  *   call to populate /users, /groups, /devices, /phone-numbers,
  *   /routing-policies, /call-logs. Backed by `@charlie/adapters-sapien`
  *   when the dispatcher Lambda has `CHARLIE_ADAPTER=sapien`.
  *
- *   Mutations (create/update/delete) live in the existing SF SOQL adapters
- *   for now — the corresponding Charlie resolvers are NOT_IMPLEMENTED
- *   pending the Sapien-team conversation in
- *   `charlie-api/docs/CONTINUATION_PROMPT.md` ("Open Sapien-team
- *   questions").
+ * Phase B.5 (SIP-driven pivot — May 2026):
+ *   SIP-layer call-control mutations (dial / answer / hangup / hold /
+ *   unhold / mute / unmute / sendDtmf / blindTransfer / attendedTransfer*)
+ *   moved out of Charlie's GraphQL surface. The webphone widget drives
+ *   those directly via JsSIP against `webphoned`. See
+ *   `charlie-api/docs/CTI_INTEGRATION.md`.
  */
 
 import { gql } from 'graphql-request';
@@ -159,212 +158,139 @@ export const OnAgentStateChangedSubscription = gql`
 `;
 
 // =============================================================================
-// Call control
+// Call events (subscriptions only — SIP-layer call control happens
+// via JsSIP in the webphone widget; see Phase B.5 note above)
 // =============================================================================
 
-export const DialMutation = gql`
-  mutation Dial($input: DialInput!) {
-    dial(input: $input) {
-      correlationId
-      accepted
-      call {
-        id
-        state
-        direction
-      }
-      errors {
-        code
-        description
-      }
-    }
-  }
-`;
-
-export const AnswerMutation = gql`
-  mutation Answer($input: AnswerInput!) {
-    answer(input: $input) {
-      correlationId
-      accepted
-      call {
-        id
-        state
-      }
-      errors {
-        code
-        description
-      }
-    }
-  }
-`;
-
-export const HangupMutation = gql`
-  mutation Hangup($input: HangupInput!) {
-    hangup(input: $input) {
-      correlationId
-      accepted
-      call {
-        id
-        state
-      }
-      errors {
-        code
-        description
-      }
-    }
-  }
-`;
-
-export const HoldMutation = gql`
-  mutation Hold($input: HoldInput!) {
-    hold(input: $input) {
-      correlationId
-      accepted
-      call {
-        id
-        state
-      }
-      errors {
-        code
-        description
-      }
-    }
-  }
-`;
-
-export const UnholdMutation = gql`
-  mutation Unhold($input: UnholdInput!) {
-    unhold(input: $input) {
-      correlationId
-      accepted
-      call {
-        id
-        state
-      }
-      errors {
-        code
-        description
-      }
-    }
-  }
-`;
-
-export const MuteMutation = gql`
-  mutation Mute($input: MuteInput!) {
-    mute(input: $input) {
-      correlationId
-      accepted
-      call {
-        id
-        state
-      }
-      errors {
-        code
-        description
-      }
-    }
-  }
-`;
-
-export const UnmuteMutation = gql`
-  mutation Unmute($input: UnmuteInput!) {
-    unmute(input: $input) {
-      correlationId
-      accepted
-      call {
-        id
-        state
-      }
-      errors {
-        code
-        description
-      }
-    }
-  }
-`;
-
-export const SendDtmfMutation = gql`
-  mutation SendDtmf($input: SendDtmfInput!) {
-    sendDtmf(input: $input) {
-      correlationId
-      accepted
-      errors {
-        code
-        description
-      }
-    }
-  }
-`;
-
-export const BlindTransferMutation = gql`
-  mutation BlindTransfer($input: BlindTransferInput!) {
-    blindTransfer(input: $input) {
-      correlationId
-      accepted
-      call {
-        id
-        state
-      }
-      errors {
-        code
-        description
-      }
-    }
+// Charlie's `CallEvent` union members all carry `{ correlationId, type,
+// call: Call }` (per `packages/server/src/schema/calls.graphql`).
+// Earlier this client speculatively asked for flat `callId / userId /
+// from / to / ringingAt / answeredAt / progress` fields on each event
+// type — those don't exist on the server and AppSync rejected the
+// subscription with a wall of `Validation error of type FieldUndefined`.
+//
+// The shape below mirrors the schema verbatim. The few flat-shaped
+// events (`CallDtmfEvent`, recording started/stopped) ARE flat on the
+// server, so we keep their flat selection.
+const CallSummaryFragment = gql`
+  fragment CallSummary on Call {
+    id
+    organizationId
+    userId
+    direction
+    state
+    startedAt
+    answeredAt
+    endedAt
   }
 `;
 
 export const OnCallEventSubscription = gql`
+  ${CallSummaryFragment}
   subscription OnCallEvent($userId: Int, $callId: ID) {
     onCallEvent(userId: $userId, callId: $callId) {
       __typename
       ... on CallRingingEvent {
-        callId
-        userId
-        from
-        to
-        direction
-        ringingAt
-      }
-      ... on CallAnsweredEvent {
-        callId
-        userId
-        answeredAt
-      }
-      ... on CallHeldEvent {
-        callId
-        userId
-      }
-      ... on CallUnheldEvent {
-        callId
-        userId
-      }
-      ... on CallMutedEvent {
-        callId
-        userId
-      }
-      ... on CallUnmutedEvent {
-        callId
-        userId
-      }
-      ... on CallTransferredEvent {
-        callId
-        userId
-        transferredTo
-      }
-      ... on CallHungupEvent {
-        callId
-        userId
-        cause
-        endedAt
+        correlationId
+        type
+        call {
+          ...CallSummary
+        }
       }
       ... on CallProgressEvent {
-        callId
-        userId
-        progress
+        correlationId
+        type
+        call {
+          ...CallSummary
+        }
+      }
+      ... on CallAnsweredEvent {
+        correlationId
+        type
+        call {
+          ...CallSummary
+        }
+      }
+      ... on CallHeldEvent {
+        correlationId
+        type
+        call {
+          ...CallSummary
+        }
+      }
+      ... on CallUnheldEvent {
+        correlationId
+        type
+        call {
+          ...CallSummary
+        }
+      }
+      ... on CallMutedEvent {
+        correlationId
+        type
+        call {
+          ...CallSummary
+        }
+      }
+      ... on CallUnmutedEvent {
+        correlationId
+        type
+        call {
+          ...CallSummary
+        }
+      }
+      ... on CallTransferringEvent {
+        correlationId
+        type
+        call {
+          ...CallSummary
+        }
+        consultCallId
+      }
+      ... on CallTransferredEvent {
+        correlationId
+        type
+        call {
+          ...CallSummary
+        }
+        transferredTo
+      }
+      ... on CallConferencedEvent {
+        correlationId
+        type
+        call {
+          ...CallSummary
+        }
+        participantCallIds
+      }
+      ... on CallHungupEvent {
+        correlationId
+        type
+        call {
+          ...CallSummary
+        }
+        cause
       }
       ... on CallDtmfEvent {
+        correlationId
+        type
         callId
         userId
         digits
+      }
+      ... on CallRecordingStartedEvent {
+        correlationId
+        type
+        callId
+        userId
+        recordingId
+      }
+      ... on CallRecordingStoppedEvent {
+        correlationId
+        type
+        callId
+        userId
+        recordingId
       }
     }
   }

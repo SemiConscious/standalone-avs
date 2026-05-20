@@ -39,6 +39,7 @@ import { createHash } from 'node:crypto';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import {
   fetchSapienUserIdentity,
+  getNatterboxUserId,
   getSapienAccessTokenWithExpiry,
   getSapienHost,
 } from '$lib/server/gatekeeper';
@@ -185,40 +186,76 @@ export const POST: RequestHandler = async ({ request, url, fetch }) => {
       sapienAccessToken = sapien.accessToken;
       sapienAccessTokenExpiresAt = Math.floor(sapien.expiresAt.getTime() / 1000);
 
-      // Resolve the bearer's REAL Sapien identity. The hardcoded
-      // CHARLIE_INTROSPECTION_NBX_ORG_ID / _USER_ID env vars were a Phase 1.1
-      // stub and produced a stable bug for variant-7 callers: Charlie's
-      // Gatekeeper-bound URL became `/token/sapien/organisation/<stub>/user/<stub>`,
-      // but the Gatekeeper Lambda authoriser builds an Allow policy from the
-      // bearer's actual `organisationId` (`<myorgid>` placeholder in
-      // `platform-auth-scopes/gatekeeper.yml`). Stub != bearer org → policy
-      // doesn't match the URL → API Gateway 403 with the misleading
-      // "execute-api:Invoke / explicit deny" wording. The fix is to discover
-      // the bearer's identity here and ship it to Charlie unchanged; the AVS
-      // Apex code (`AuthGatekeeper.cls`) does the equivalent client-side
-      // lookup against `nbavs__User__c` keyed by SF user id.
+      // Resolve the bearer's REAL Sapien identity. Two independent lookups:
+      //
+      //   1. **Org id** comes from `Sapien /user/me`. The Sapien token is
+      //      the AVS variant-7 API-user's token, but `/user/me` correctly
+      //      reports `organisationId` for the Natterbox tenant the AVS
+      //      package is provisioned against (typically the SF org's
+      //      Natterbox org).
+      //
+      //   2. **User id** must come from the AVS Salesforce side, NOT
+      //      `/user/me`. `/user/me` returns the bearer's identity — for the
+      //      AVS variant-7 chain that's the API-service-account user
+      //      (e.g. `4peklibjkum8gkcc088o808g0wkk40w@avs.natterbox.com`),
+      //      not the SF user who is logged in. Resolving the SF user's
+      //      Natterbox identity requires a SOQL lookup against
+      //      `nbavs__User__c WHERE nbavs__User__c = '<sfUserId>'`,
+      //      keyed by the SF user id from the userinfo response. This is
+      //      the same lookup the AVS Apex code (`AuthGatekeeper.cls`)
+      //      performs client-side.
+      //
+      //      Without this lookup, Charlie's per-user Sapien resolvers
+      //      (e.g. `getMediaTransport` → `findFirstWebphoneForUser`) end
+      //      up looking for the API user's webphone provisioning, find
+      //      none (by design — service accounts don't get webphones),
+      //      and fall back to a placeholder SIP password. The user's
+      //      browser then sees `REGISTRATION_FAILED` against `webphoned`.
+      //
+      // Falls back to env-var stubs (Phase 1.1 carry-overs) only when
+      // both Sapien-side and SF-side lookups fail, so local-dev / demo
+      // environments without a real `nbavs__User__c` record continue to
+      // function for non-webphone work.
       const sapienHost = getSapienHost();
       if (sapienHost) {
         try {
           const identity = await fetchSapienUserIdentity(sapienHost, sapien.accessToken);
           sapienResolvedOrgId = identity.orgId;
-          sapienResolvedUserId = identity.userId;
         } catch (identityErr) {
           console.warn(
-            '[charlie/introspect] Sapien /user/me lookup failed; falling back to ' +
-              `CHARLIE_INTROSPECTION_NBX_ORG_ID/_USER_ID env stubs. Error: ` +
-              `${identityErr instanceof Error ? identityErr.message : String(identityErr)}`,
+            '[charlie/introspect] Sapien /user/me lookup failed (orgId resolution); ' +
+            'falling back to CHARLIE_INTROSPECTION_NBX_ORG_ID stub. Error: ' +
+            `${identityErr instanceof Error ? identityErr.message : String(identityErr)}`,
           );
         }
       }
+      try {
+        sapienResolvedUserId = await getNatterboxUserId(
+          instanceUrl,
+          subjectToken,
+          userinfo.user_id,
+        );
+      } catch (mapErr) {
+        console.warn(
+          '[charlie/introspect] SF -> Natterbox user-id lookup failed for SF user ' +
+          `${userinfo.user_id}; the AVS package may not be installed in the SF org or ` +
+          'the user may not have a `nbavs__User__c` record. Falling back to ' +
+          'CHARLIE_INTROSPECTION_NBX_USER_ID stub (webphone provisioning will be ' +
+          `placeholder). Error: ${mapErr instanceof Error ? mapErr.message : String(mapErr)}`,
+        );
+      }
+      // SIP credentials + any other per-resource lookups happen on
+      // demand via `/api/charlie/callback` once Charlie's
+      // getMediaTransport runs — see docs/PARTNER_CALLBACK.md.
+      // Introspection is identity-only.
     } catch (err) {
       // Don't fail the whole introspection — Charlie copes with
       // missing-token sessions. Just log so an operator can investigate
       // why this partner's Sapien provisioning is broken.
       console.warn(
         '[charlie/introspect] Sapien access-token acquisition failed; ' +
-          'returning identity-only response. Sapien-backed Charlie resolvers will return SESSION_NOT_FOUND. ' +
-          `Error: ${err instanceof Error ? err.message : String(err)}`,
+        'returning identity-only response. Sapien-backed Charlie resolvers will return SESSION_NOT_FOUND. ' +
+        `Error: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
@@ -239,23 +276,23 @@ export const POST: RequestHandler = async ({ request, url, fetch }) => {
     });
   }
 
-  // The `x_nbox` block carries Natterbox identity + the Sapien access
-  // token from variant 7. We deliberately do NOT include partner-CRM
-  // credentials (SF access tokens, refresh tokens, instance URLs) —
-  // Charlie is partner-CRM-agnostic on its data plane and has no
-  // consumer for them. A previous revision sent a `crmContext` block
-  // carrying the SF access token + instance URL; that pipeline (the
-  // dispatcher-side `crm` claim, `CrmContextCipher`,
-  // `@charlie/adapters-salesforce`) has been retired. Defence in depth:
-  // even if Charlie were compromised, it would not have the SF token to
-  // lift.
+  // The `x_nbox` block carries:
   //
-  // The Sapien access token IS shipped — but Sapien is the
-  // Natterbox-shared platform that every Charlie consumer ultimately
-  // reaches, not a partner-CRM credential. The token is org-scoped
-  // (one Natterbox org per `nbavs__API_v1__c` credential set), short-
-  // lived (Sapien's expires_in), and stored Charlie-side keyed by JWT
-  // jti so the JWT body never carries it.
+  //   1. Natterbox identity (organizationId, userId, sfUserId, sfOrgId).
+  //   2. The Sapien access token from variant 7. Sapien is the
+  //      Natterbox-shared platform every Charlie consumer eventually
+  //      hits — token is org-scoped, short-lived, stored Charlie-side
+  //      keyed by jti.
+  //   3. `partner_session` — the user's SF OAuth access token + their
+  //      SF instance URL, which Charlie will round-trip back to us at
+  //      `/api/charlie/callback` time so we can act as the same OAuth
+  //      user when we need to do per-resource SOQL (e.g. fetching the
+  //      webphone SIP password from `nbavs__Device__c`). This is NOT a
+  //      service-account credential — it's exactly the user-scoped
+  //      token the user already authenticated with at this app, no
+  //      broader, no longer-lived. Charlie persists it on the per-jti
+  //      session row alongside the Sapien token. See
+  //      `charlie-api/docs/PARTNER_CALLBACK.md` § "partner_session".
   const xNbox: Record<string, unknown> = {
     organizationId: orgId,
     userId: userId,
@@ -265,6 +302,12 @@ export const POST: RequestHandler = async ({ request, url, fetch }) => {
   if (sapienAccessToken && sapienAccessTokenExpiresAt) {
     xNbox['sapienAccessToken'] = sapienAccessToken;
     xNbox['sapienAccessTokenExpiresAt'] = sapienAccessTokenExpiresAt;
+  }
+  if (instanceUrl) {
+    xNbox['partner_session'] = {
+      accessToken: subjectToken,
+      instanceUrl,
+    };
   }
 
   return new Response(
