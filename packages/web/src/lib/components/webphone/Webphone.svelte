@@ -238,38 +238,106 @@
   // Subscription + JsSIP event handlers
   // ---------------------------------------------------------------------------
 
+  type CallSummary = {
+    id: string;
+    organizationId: number;
+    userId: number;
+    direction: 'INBOUND' | 'OUTBOUND' | 'INTERNAL';
+    state:
+      | 'RINGING'
+      | 'PROGRESS'
+      | 'ANSWERED'
+      | 'HELD'
+      | 'TRANSFERRING'
+      | 'TRANSFERRED'
+      | 'CONFERENCED'
+      | 'HUNGUP';
+    startedAt: string;
+    answeredAt: string | null;
+    endedAt: string | null;
+  };
+
+  // Mirrors `union CallEvent` in `packages/server/src/schema/calls.graphql`.
+  // Most members carry `{ correlationId, type, call: CallSummary }`;
+  // the DTMF + recording events are flat (see schema for details).
   type CallEventPayload =
+    | { __typename: 'CallRingingEvent'; correlationId: string; type: string; call: CallSummary }
+    | { __typename: 'CallProgressEvent'; correlationId: string; type: string; call: CallSummary }
+    | { __typename: 'CallAnsweredEvent'; correlationId: string; type: string; call: CallSummary }
+    | { __typename: 'CallHeldEvent'; correlationId: string; type: string; call: CallSummary }
+    | { __typename: 'CallUnheldEvent'; correlationId: string; type: string; call: CallSummary }
+    | { __typename: 'CallMutedEvent'; correlationId: string; type: string; call: CallSummary }
+    | { __typename: 'CallUnmutedEvent'; correlationId: string; type: string; call: CallSummary }
     | {
-        __typename: 'CallRingingEvent';
-        callId: string;
-        from: string | null;
-        to: string | null;
-        direction: 'INBOUND' | 'OUTBOUND';
+        __typename: 'CallTransferringEvent';
+        correlationId: string;
+        type: string;
+        call: CallSummary;
+        consultCallId: string | null;
       }
-    | { __typename: 'CallProgressEvent'; callId: string }
-    | { __typename: 'CallAnsweredEvent'; callId: string }
-    | { __typename: 'CallHeldEvent'; callId: string }
-    | { __typename: 'CallUnheldEvent'; callId: string }
-    | { __typename: 'CallMutedEvent'; callId: string }
-    | { __typename: 'CallUnmutedEvent'; callId: string }
-    | { __typename: 'CallTransferredEvent'; callId: string }
-    | { __typename: 'CallHungupEvent'; callId: string; cause: string }
-    | { __typename: 'CallDtmfEvent'; callId: string };
+    | {
+        __typename: 'CallTransferredEvent';
+        correlationId: string;
+        type: string;
+        call: CallSummary;
+        transferredTo: string | null;
+      }
+    | {
+        __typename: 'CallConferencedEvent';
+        correlationId: string;
+        type: string;
+        call: CallSummary;
+        participantCallIds: string[];
+      }
+    | {
+        __typename: 'CallHungupEvent';
+        correlationId: string;
+        type: string;
+        call: CallSummary;
+        cause: string | null;
+      }
+    | {
+        __typename: 'CallDtmfEvent';
+        correlationId: string;
+        type: string;
+        callId: string;
+        userId: number;
+        digits: string;
+      }
+    | {
+        __typename: 'CallRecordingStartedEvent';
+        correlationId: string;
+        type: string;
+        callId: string;
+        userId: number;
+        recordingId: string;
+      }
+    | {
+        __typename: 'CallRecordingStoppedEvent';
+        correlationId: string;
+        type: string;
+        callId: string;
+        userId: number;
+        recordingId: string;
+      };
 
   /**
    * Charlie's `onCallEvent` arrives keyed by the **Sapien call id**
-   * (FreeSWITCH UUID). The local SIP UA's leg map is keyed by the
-   * **JsSIP session id**. The two id spaces don't align in this
-   * phase — correlating them is a known follow-up (likely via the
-   * SIP Call-ID header on the outbound INVITE, which propagates
-   * through to FreeSWITCH and becomes part of the SapienCall record).
+   * (FreeSWITCH UUID, on `ev.call.id` for most events / `ev.callId`
+   * for the flat-shaped DTMF + recording events). The local SIP UA's
+   * leg map is keyed by the **JsSIP session id**. The two id spaces
+   * don't align in this phase — correlating them is a known follow-up
+   * (likely via the SIP Call-ID header on the outbound INVITE, which
+   * propagates through to FreeSWITCH and becomes part of the
+   * SapienCall record).
    *
    * For now this handler only logs. The local SIP events drive the
    * UI's leg list. Cross-device sync (another tab, supervisor
    * listenIn etc.) will land when correlation is implemented.
    */
   function handleCallEvent(ev: CallEventPayload): void {
-    console.debug('[webphone] charlie onCallEvent', ev.__typename, 'callId=', ev.callId);
+    const sapienCallId = 'callId' in ev ? ev.callId : ev.call.id;
+    console.debug('[webphone] charlie onCallEvent', ev.__typename, 'sapienCallId=', sapienCallId);
   }
 
   function handleWebphoneEvent(ev: WebphoneClientEvent): void {

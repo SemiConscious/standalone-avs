@@ -162,59 +162,135 @@ export const OnAgentStateChangedSubscription = gql`
 // via JsSIP in the webphone widget; see Phase B.5 note above)
 // =============================================================================
 
+// Charlie's `CallEvent` union members all carry `{ correlationId, type,
+// call: Call }` (per `packages/server/src/schema/calls.graphql`).
+// Earlier this client speculatively asked for flat `callId / userId /
+// from / to / ringingAt / answeredAt / progress` fields on each event
+// type — those don't exist on the server and AppSync rejected the
+// subscription with a wall of `Validation error of type FieldUndefined`.
+//
+// The shape below mirrors the schema verbatim. The few flat-shaped
+// events (`CallDtmfEvent`, recording started/stopped) ARE flat on the
+// server, so we keep their flat selection.
+const CallSummaryFragment = gql`
+  fragment CallSummary on Call {
+    id
+    organizationId
+    userId
+    direction
+    state
+    startedAt
+    answeredAt
+    endedAt
+  }
+`;
+
 export const OnCallEventSubscription = gql`
+  ${CallSummaryFragment}
   subscription OnCallEvent($userId: Int, $callId: ID) {
     onCallEvent(userId: $userId, callId: $callId) {
       __typename
       ... on CallRingingEvent {
-        callId
-        userId
-        from
-        to
-        direction
-        ringingAt
-      }
-      ... on CallAnsweredEvent {
-        callId
-        userId
-        answeredAt
-      }
-      ... on CallHeldEvent {
-        callId
-        userId
-      }
-      ... on CallUnheldEvent {
-        callId
-        userId
-      }
-      ... on CallMutedEvent {
-        callId
-        userId
-      }
-      ... on CallUnmutedEvent {
-        callId
-        userId
-      }
-      ... on CallTransferredEvent {
-        callId
-        userId
-        transferredTo
-      }
-      ... on CallHungupEvent {
-        callId
-        userId
-        cause
-        endedAt
+        correlationId
+        type
+        call {
+          ...CallSummary
+        }
       }
       ... on CallProgressEvent {
-        callId
-        userId
-        progress
+        correlationId
+        type
+        call {
+          ...CallSummary
+        }
+      }
+      ... on CallAnsweredEvent {
+        correlationId
+        type
+        call {
+          ...CallSummary
+        }
+      }
+      ... on CallHeldEvent {
+        correlationId
+        type
+        call {
+          ...CallSummary
+        }
+      }
+      ... on CallUnheldEvent {
+        correlationId
+        type
+        call {
+          ...CallSummary
+        }
+      }
+      ... on CallMutedEvent {
+        correlationId
+        type
+        call {
+          ...CallSummary
+        }
+      }
+      ... on CallUnmutedEvent {
+        correlationId
+        type
+        call {
+          ...CallSummary
+        }
+      }
+      ... on CallTransferringEvent {
+        correlationId
+        type
+        call {
+          ...CallSummary
+        }
+        consultCallId
+      }
+      ... on CallTransferredEvent {
+        correlationId
+        type
+        call {
+          ...CallSummary
+        }
+        transferredTo
+      }
+      ... on CallConferencedEvent {
+        correlationId
+        type
+        call {
+          ...CallSummary
+        }
+        participantCallIds
+      }
+      ... on CallHungupEvent {
+        correlationId
+        type
+        call {
+          ...CallSummary
+        }
+        cause
       }
       ... on CallDtmfEvent {
+        correlationId
+        type
         callId
         userId
         digits
+      }
+      ... on CallRecordingStartedEvent {
+        correlationId
+        type
+        callId
+        userId
+        recordingId
+      }
+      ... on CallRecordingStoppedEvent {
+        correlationId
+        type
+        callId
+        userId
+        recordingId
       }
     }
   }
